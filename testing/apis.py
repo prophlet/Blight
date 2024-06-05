@@ -113,6 +113,10 @@ print(f"{decrypted_response}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
 
 if decrypted_response != "Ok":
 
+    img = None
+    with open("image.png", 'rb') as f:
+        img = f.read()
+
     print("[?] Submit Output")
     submit_output = requests.post(
         SERVER_ADDRESS + "/gateway", 
@@ -120,9 +124,10 @@ if decrypted_response != "Ok":
             "action": "submit_output",
             "client_id": client_id,
             "command_id": json.loads(decrypted_response)["command_id"],
-            "output": base64.b64encode(secrets.token_bytes(100000)).decode("utf-8")
+            "output": base64.b64encode(img).decode("utf-8")
         }), new_encryption_key)
     )
+    print(submit_output.text)
     decrypted_response = decrypt_data_withkey(submit_output.text, new_encryption_key).decode("utf-8")
     print(f"{decrypted_response}\n{'_'*50}")
 

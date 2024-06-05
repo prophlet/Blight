@@ -1,11 +1,13 @@
 extern crate openssl;
 extern crate colored; 
+use actix_web::web::BufMut;
 use actix_web::{
     post,
     App, HttpResponse, 
     HttpServer, Responder, 
     HttpRequest,
-    http::StatusCode
+    http::StatusCode,
+    web
 };
 
 use rsa::pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey};
@@ -1468,8 +1470,10 @@ async fn main() -> std::io::Result<()> {
         format!("http://{}/gateway", &key_to_string(&parsed_json_config, "host")).yellow()
     ));
 
+    
     HttpServer::new(move || {
         App::new()
+            .app_data(web::PayloadConfig::default().limit(100000000)) // 500mb
             .service(gateway)
             .service(api_issue)
             .service(api_clients_list)
