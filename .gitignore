@@ -1,4 +1,5 @@
 .venv/*
 backend/target/*
+backend/artifacts/outputs
 Cargo.lock
 *.sh
