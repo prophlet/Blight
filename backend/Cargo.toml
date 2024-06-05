@@ -1,0 +1,31 @@
+[package]
+name = "blight"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+strip = true 
+lto = true
+codegen-units = 1
+
+[dependencies]
+actix-web = "4.5.1"
+aes = "0.8.4"
+base64 = "0.22.0"
+colored = "2.1.0"
+futures-util = "0.3.30"
+geolocation = "0.2.1"
+hex = "0.4.3"
+ip2location = "0.5.0"
+lazy_static = "1.4.0"
+maxminddb = "0.24.0"
+md5 = "0.7.0"
+mysql_async = "0.34.1"
+openssl = "0.10.64"
+pgp = "0.11.0"
+rand = "0.8.5"
+random-string = "1.1.0"
+randomizer = "0.1.2"
+rsa = "0.9.6"
+serde_json = "1.0.116"
+sha256 = "1.5.0"

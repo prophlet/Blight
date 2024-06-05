@@ -42,12 +42,12 @@ client_bytes = secrets.token_bytes(32)
 
 keydata = b'''
 -----BEGIN RSA PUBLIC KEY-----
-MIIBCgKCAQEAuKxmbcHaXTmyXfWf1JxNvJD2Fn/KQ5RdtfHVrFCmTkAJufaCOtlZ
-8tw0Q2a1sowfyBcvLuXr6pYO0CRsn6S9pi3GxRbvPoyNZvtIotKIVFBEMttmt6Uw
-xIaH1TRitX/KbpYsXIsvhj5szQnXRl9Yj/mZIpPvZb2+lHJF3BXW8HZO21aaBlbi
-p6QPF++bX+tMn+8rRPJAGGgNiUvScgf8R8SkBncMW9IU0tDLzpnD7jNOOKB+ldJK
-LFbSu+VPkMCaalHCfOyD1tZSGsqYGk4iWbc/qf38cHixbaMz7CLYfN3ExEQ/yN6z
-hdGL7XB6H2KSsjCmbFzCZTslgt9fCo10twIDAQAB
+MIIBCgKCAQEAx+zN1dr6iV1Upyd9ixoG2gxvupYqIeuFMV0GgWcCK91pcPZCkeQG
+SDy/LhGjCjOMvX/2Eg0wsed99hntvZ2b6RKdsdfrSVUFxvp6H0lEVPGPjDCMssjY
+RLi3JbKIopLtgdDHdnf4nCpnSrMNFV5ZuqdIoQIMaw/imyWATNSB18WOebAA8lI9
+oR0XG89Ob3/IyxIAK1rUqlx1a1oJ+uBsLscsxwOGWyXir6by31uVfrdzxORFviCr
+8bZfuX5wF06WQ9TH1WFAw/G4CTTWP5qooLug04Qt7cAemTLfJjkyaDeLq20ia2ix
+xs9LxVype+cEoOSfpawaAH71Kw+d40Dp7wIDAQAB
 -----END RSA PUBLIC KEY-----
 '''
 
