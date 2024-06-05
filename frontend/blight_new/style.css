@@ -1,0 +1,303 @@
+@import url('https://fonts.googleapis.com/css2?family=Work+Sans:ital,wght@0,100..900;1,100..900&display=swap');
+
+:root {
+  --app-bg: #101827;
+  --sidebar: rgba(21, 30, 47, 1);
+  --sidebar-main-color: rgb(13, 15, 24);
+  --table-border: #1a2131;
+  --table-header: #1a2131;
+  --app-content-main-color: #fff;
+  --sidebar-link: #fff;
+  --sidebar-active-link: #1d283c;
+  --sidebar-hover-link: #1a2539;
+  --action-color: #2869ff;
+  --action-color-hover: #6291fd;
+  --app-content-secondary-color: #1d283c;
+  --filter-reset: #2c394f;
+  --filter-shadow: rgba(16, 24, 39, 0.8) 0px 6px 12px -2px, rgba(0, 0, 0, 0.3) 0px 3px 7px -3px;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  color: #fff;
+  background-color: var(--sidebar-main-color);
+
+}
+
+.container {
+  display: flex;
+}
+
+.sidebar {
+  margin-top: 120px;
+  width: 250px;
+  background-color: var(--sidebar-main-color);
+  padding: 20px;
+  position: fixed;
+}
+
+
+.fas {
+  font-size: 20px;
+  padding-right: 10px;
+}
+
+.sidebar ul {
+  list-style-type: none;
+  padding: 0;
+  
+}
+.sidebar li {
+  margin: 10px;
+  padding: 10px;
+  padding-bottom: 5px;
+  display: flex;
+}
+
+.sidebar .active {
+  border-radius: 10px;
+  background-color: var(--app-content-secondary-color);
+  margin: 10px;
+  padding: 10px;
+  padding-bottom: 5px;
+  display: flex;
+
+}
+
+.sidebar-link {
+  color: var(--sidebar-link);
+  text-decoration: none;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  margin-left: 10px;
+}
+
+.sidebar-link i {
+  margin-right: 10px;
+}
+
+.content {
+  flex-grow: 1;
+  padding: 20px;
+  background-color: var(--app-bg);
+  font-size: 13px;
+  margin-left: 300px;
+  min-height: 1200px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border: 1px solid var(--table-border);
+  padding: 8px;
+  text-align: left;
+}
+
+th {
+  background-color: var(--table-header);
+  color: var(--app-content-main-color);
+}
+
+body {
+  font-family: Arial, sans-serif;
+  color: #fff;
+}
+
+.sidebar .section {
+  margin-top: 25px;
+}
+
+.logo img {
+  width: 35px;
+  margin-right: 15px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  margin-right: 0;
+  justify-content: center;
+  margin-left: -40px;
+}
+
+.sidebar-list-container {
+  background-color: var(--app-bg);
+  border-radius: 10px;
+  padding: 5px;
+  
+}
+
+.flag {
+  width: 30px;
+}
+
+
+.work-sans-heavy {
+  font-family: "Work Sans", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 900;
+  font-style: normal;
+}
+
+.work-sans-normal {
+  font-family: "Work Sans", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 400;
+  font-style: normal;
+  font-size: 16px;
+}
+
+.work-sans-light {
+  font-family: "Work Sans", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 300;
+  font-style: normal;
+}
+
+
+.cards {
+  margin-top: -10px;
+  display: flex;
+  margin-right: -15px;
+}
+
+.card {
+  background-color: var(--app-content-secondary-color);
+  width: 100%;
+  height: 75px;
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  margin: 20px;
+  margin-left: 0;
+}
+
+.card-header {
+  font-size: 14px;
+  margin-top: 0;
+}
+
+.card-header p {
+  margin-top: 0;
+}
+
+.card-number {
+  font-size: 35px;
+  position: absolute;
+}
+
+.icon {
+  position: relative; /* Add relative positioning to the icon container */
+}
+
+.icon .fas {
+  position: absolute;
+  top: 50%; /* Position the icon vertically in the middle */
+  left: 80%; /* Adjust the left position as needed */
+  transform: translateY(-50%); /* Center the icon vertically */
+  font-size: 50px; /* Adjust the font size as needed */
+}
+
+.progress-container {
+  width: 75%; /* Adjust based on your needs */
+  background-color: var(--filter-reset); /* Light grey background */
+  border-radius: 5px; /* Rounded corners */
+}
+
+.progress-bar {
+  border-radius: 5px;
+  height: 20px;
+  background-color: white;
+  text-align: center;
+  line-height: 20px; 
+  color: white;
+}
+
+
+button {
+  background-color: var(--app-content-secondary-color);
+  border-radius: 5px;
+  border-color: white;
+  border-style: solid;
+  border-width: 1px;
+  color: var(--app-content-main-color);
+  width: 75px;
+  height: 30px;
+}
+
+
+
+/* Form Submission */
+.form-container {
+  width: 50%;
+  margin: 50px auto;
+  padding: 20px;
+  background-color: var(--sidebar-main-color);
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  color: var(--sidebar-link);
+  margin-left: 10px;
+  margin-right: 10px;
+  height: 100%;
+}
+
+h2 {
+  text-align: center;
+}
+
+form {
+  margin-top: 20px;
+}
+
+input[type="text"],
+input[type="email"],
+textarea, select {
+  width: 100%;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  border: none;
+  border-radius: 5px;
+  margin-bottom: 25px;
+  background-color: var(--table-border);
+  color: var(--sidebar-link);
+  margin-top: 5px;
+  
+}
+
+textarea {
+  height: 100px;
+}
+
+input[type="submit"] {
+  margin-top: 15px;
+  background-color: var(--filter-reset);
+  border-style: none;
+  border-radius: 10px;
+  color: var(--app-content-main-color);
+  width: 100%;
+  height: 50px;
+}
+
+
+.forms {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+
+hr {
+  color: rgba(255, 255, 255, 0.148);
+}
+
+.form-header {
+  margin-bottom : 0;
+  padding-bottom: 0;
+}

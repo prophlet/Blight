@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dynamic Inputs</title>
+    <style>
+   .input-group {
+        display: flex;
+        flex-wrap: wrap; /* Allow items to wrap as needed */
+        align-items: center; /* Align items vertically in the middle */
+        margin-bottom: 10px;
+    }
+
+    input[type="text"], button {
+        padding: 5px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        margin-right: 5px; /* Add some space between inputs and buttons */
+    }
+
+    button {
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        cursor: pointer;
+        border-radius: 4px;
+    }
+    </style>
+</head>
+<body>
+
+<form id="dynamicForm">
+    <div class="input-group">
+        <input type="text" name="inputs[]" placeholder="Input..." onclick="this.nextSibling &&!this.nextSibling.disabled? addInput(this.parentNode) : null">
+        <button type="button" disabled>+/-</button>
+    </div>
+</form>
+
+<script>
+    function addInput(inputGroup) {
+        const newInputGroup = inputGroup.cloneNode(true);
+        newInputGroup.innerHTML = `<input type="text" name="inputs[]" placeholder="Input..."><button type="button">+/-</button>`;
+        document.getElementById('dynamicForm').appendChild(newInputGroup);
+
+        // Enable the button in the newly added input group
+        newInputGroup.querySelector('button').disabled = false;
+
+        // Update the event listener for the new button
+        newInputGroup.querySelector('button').onclick = function() { addInput(inputGroup); };
+    }
+
+    document.getElementById('dynamicForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        this.submit(); // Submit the form programmatically
+    });
+</script>
+</body>
+</html>

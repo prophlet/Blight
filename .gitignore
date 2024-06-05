@@ -1,0 +1,7 @@
+.venv/*
+python_client_poc/venv/*
+backend/target/*
+Cargo.lock
+*.pem
+*.json
+*.sh

