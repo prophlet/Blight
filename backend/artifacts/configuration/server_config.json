@@ -1,0 +1,7 @@
+{
+  "api_secret": "debug",
+  "connection_interval": 60,
+  "honor_client_blocks": false,
+  "host": "127.0.0.1:9999",
+  "mysql_server": "mysql://root:root@127.0.0.1:3306/database"
+}
