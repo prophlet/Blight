@@ -106,13 +106,14 @@ def clientelle():
             decrypted_response = decrypt_data_withkey(heartbeat_response.text, encryption_key).decode("utf-8")
             if decrypted_response != "Ok":
                 try:
+                    print(len(base64.b64encode(secrets.token_bytes(1024)).decode("utf-8")))
                     submit_output = requests.post(
                         SERVER_ADDRESS + "/gateway",
                         client_id + encrypt_data_withkey(json.dumps({
                             "action": "submit_output",
                             "client_id": client_id,
                             "command_id": json.loads(decrypted_response)["command_id"],
-                            "output": "Example Output"
+                            "output": base64.b64encode(secrets.token_bytes(1024)).decode("utf-8")
                         }), encryption_key),
                     )
                     print(f"Submit Output response for client {client_id}: {submit_output.text}")
@@ -128,4 +129,4 @@ def create_threads(num_threads):
         threads.append(thread)
     return threads
 
-threads = create_threads(200)
+threads = create_threads(100)
