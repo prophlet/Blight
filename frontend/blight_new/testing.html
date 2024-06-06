@@ -1,58 +1,109 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <title>Dynamic Inputs</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+    <title>Single Page Lightbox</title>
+    <link rel="stylesheet" href="style.css">
     <style>
-   .input-group {
-        display: flex;
-        flex-wrap: wrap; /* Allow items to wrap as needed */
-        align-items: center; /* Align items vertically in the middle */
-        margin-bottom: 10px;
-    }
-
-    input[type="text"], button {
-        padding: 5px;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        margin-right: 5px; /* Add some space between inputs and buttons */
-    }
-
-    button {
-        background-color: #4CAF50;
-        color: white;
-        border: none;
-        cursor: pointer;
-        border-radius: 4px;
-    }
+        body {
+            background-color: beige;
+        }
     </style>
 </head>
+
 <body>
+    <div id="overlay"></div>
 
-<form id="dynamicForm">
-    <div class="input-group">
-        <input type="text" name="inputs[]" placeholder="Input..." onclick="this.nextSibling &&!this.nextSibling.disabled? addInput(this.parentNode) : null">
-        <button type="button" disabled>+/-</button>
+    <button id="open" onclick="openLightbox(0)">Open Lightbox</button>
+
+    <div id="lightboxesContainer">
+
+        <!-- Removed the duplicate ID attribute -->
+        <div class="lightbox">
+            <div class="forms">
+                <div class="form-container">
+                    <button class="close-bttn" onclick="closeLightbox()">
+                        <i class="fa-solid fa-minus"></i>
+                    </button>
+                    <h1 class="work-sans-light">Plugin Loading</h1>
+                    <hr>
+                    <form action="#" method="post">
+                        <label for="name">Command Type</label>
+                        <select name="Execution Type">
+                            <option value="nigga">Windows Defender Exclusion</option>
+                        </select>
+
+                        <label for="message">Description</label>
+                        <textarea class="description_plugins" name="message"
+                            disabled>Only argument is a folder path. Cannot be a file path.</textarea>
+
+                        <label for="message">Amount</label>
+                        <input type="number" placeholder="Out of 500, or blank for no limit">
+
+                        <label for="message">Arguments</label>
+                        <input type="text">
+
+                        <input id="nigga" type="submit" value="Submit">
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Added a unique identifier for the second lightbox -->
+        <div class="lightbox" id="secondLightbox">
+            <div class="forms">
+                <div class="form-container">
+                    <button class="close-bttn" onclick="closeLightbox()">
+                        <i class="fa-solid fa-minus"></i>
+                    </button>
+                    <h1 class="work-sans-light">Payload Execution</h1>
+                    <hr>
+                    <form action="#" method="post">
+                        <label for="name">Command Type</label>
+                        <select name="Execution Type">
+                            <option value="nigga">Windows Defender Exclusion</option>
+                        </select>
+
+                        <label for="message">Description</label>
+                        <textarea class="description_plugins" name="message"
+                            disabled>Only argument is a folder path. Cannot be a file path.</textarea>
+
+                        <label for="message">Amount</label>
+                        <input type="number" placeholder="Out of 500, or blank for no limit">
+
+                        <label for="message">Arguments</label>
+                        <input type="text">
+
+                        <input id="nigga" type="submit" value="Submit">
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+
     </div>
-</form>
 
-<script>
-    function addInput(inputGroup) {
-        const newInputGroup = inputGroup.cloneNode(true);
-        newInputGroup.innerHTML = `<input type="text" name="inputs[]" placeholder="Input..."><button type="button">+/-</button>`;
-        document.getElementById('dynamicForm').appendChild(newInputGroup);
+    <script>
+        var lightboxesContainer = document.getElementById("lightboxesContainer");
+        var lightboxes = Array.from(lightboxesContainer.getElementsByClassName("lightbox"));
 
-        // Enable the button in the newly added input group
-        newInputGroup.querySelector('button').disabled = false;
+        function openLightbox(index) {
+            lightboxes[index].style.opacity = "1";
+            lightboxes[index].style.pointerEvents = 'auto';
+            document.getElementById("overlay").style.opacity = ".7";
+        }
 
-        // Update the event listener for the new button
-        newInputGroup.querySelector('button').onclick = function() { addInput(inputGroup); };
-    }
-
-    document.getElementById('dynamicForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        this.submit(); // Submit the form programmatically
-    });
-</script>
+        function closeLightbox() {
+           for (let lightbox of lightboxes) {
+             lightbox.style.opacity = "0";
+             lightbox.style.pointerEvents = 'none';
+             document.getElementById("overlay").style.opacity = "0";
+           }
+        }
+    </script>
 </body>
 </html>
