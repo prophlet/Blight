@@ -1,245 +1,120 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Blight - Clients</title>
-    <link rel="stylesheet" href="{{ url_for('static',filename='css/stylesheet.css') }}" />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
-    />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="{{ url_for('static',filename='js/rclickmenu.js') }}"></script>
-    <script src="{{ url_for('static',filename='js/toast.js') }}"></script>
-  </head>
-  <body>
-    <nav class="navbar">
-      <ul>
-        <img class="logo" src="{{ url_for('static',filename='misc/logo.png') }}" />
-        <li>
-          <a href="clients"><i class="fas fa-user"></i></a>
-        </li>
-        <li>
-          <a href="loader"><i class="fas fa-inbox"></i></a>
-        </li>
-        <li>
-          <a href="logs"><i class="fas fa-envelope"></i></a>
-        </li>
-        <li>
-          <a href="builder"><i class="fas fa-screwdriver-wrench"></i></a>
-        </li>
-        <li>
-          <a href="#"><i class="fas fa-cog"></i></a>
-        </li>
-      </ul>
-    </nav>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static',filename='css/style.css') }}">
+</head>
 
-    <!--<button onclick='launch_toast("192.168.0.1 came online", "fa-solid fa-user-plus")'>Show Toast</button>-->
+<body>
+    <div class="container">
+        <aside class="sidebar">
+            <div class="logo">
+                <img src="https://i.ibb.co/zVF2SSZ/image-removebg-preview-3.png">
+                <h1 class="work-sans">Blight</h1>
+            </div>
+            <div class="sidebar-list-container">
+                <ul>
+                    <li><p class="work-sans-light">Client Managment</p></li>
 
-    <div class="cards">
-      <div class="card">
-        <header class="card-header">
-          <p>Online Clients</p>
-        </header>
-        <p class="card-number">{{ statistics["online_clients"] }}</p>
-      </div>
+                    <li class="active"><a href="clients" class="work-sans-normal sidebar-link"><i class="fas fa-user"></i>Clients</a></li>
+                    <li><a href="loader" class="work-sans-normal sidebar-link"><i class="fas fa-upload"></i>Loader</a></li>
 
-      <div class="card">
-        <header class="card-header">
-          <p>Total Clients</p>
-        </header>
-        <p class="card-number">{{ statistics["total_clients"] }}</p>
-      </div>
+                    <li><p class="work-sans-light">Server Managment</p></li>
 
-      <div class="card">
-        <header class="card-header">
-          <p>UAC Clients</p>
-        </header>
-        <p class="card-number">{{ statistics["uac_clients"] }}</p>
-      </div>
+                    <li><a href="firewall" class="work-sans-normal sidebar-link"><i class="fas fa-ban"></i>Firewall</a></li>
+                    <li><a href="server_logs" class="work-sans-normal sidebar-link"><i class="fas fa-code"></i>Server Logs</a></li>
+                    <li><a href="settings" class="work-sans-normal sidebar-link"><i class="fas fa-cog"></i>Settings</a></li>
 
-      <div class="card">
-        <header class="card-header">
-          <p>Last New Client</p>
-        </header>
-        <p class="card-number">{{ statistics["last_new_client"] }}</p>
-      </div>
+                    <li><p class="work-sans-light"> Looting + Profit</p></li>
+
+                    <li><a href="clipper" class="work-sans-normal sidebar-link"><i class="fas fa-clipboard"></i>Clipper</a>
+                    <li><a href="stealer" class="work-sans-normal sidebar-link"><i class="fas fa-mask"></i>Stealer</a></li>
+                    <li><a href="botshop" class="work-sans-normal sidebar-link"><i class="fas fa-robot"></i>Botshop</a></li>
+                </ul>
+            </div>
+        </aside>
+        <main class="content">
+
+            <div class="cards">
+                <div class="card">
+                    <header class="card-header">
+                        <p>Online Clients</p>
+                    </header>
+                    <p class="card-number">{{ statistics["online_clients"] }}</p>
+                    <span class="icon"><i class="fas fa-user"></i></span>
+                </div>
+
+                <div class="card">
+                    <header class="card-header">
+                        <p>Total Clients</p>
+                    </header>
+                    <p class="card-number">{{ statistics["total_clients"] }}</p>
+                    <span class="icon"><i class="fas fa-users"></i></span>
+                </div>
+
+                <div class="card">
+                    <header class="card-header">
+                        <p>UAC Clients</p>
+                    </header>
+                    <p class="card-number">{{ statistics["uac_clients"] }}</p>
+                    <span class="icon"><i class="fas fa-shield-halved"></i></span>
+                </div>
+
+                <div class="card">
+                    <header class="card-header">
+                        <p>Last New Client</p>
+                    </header>
+                    <p class="card-number">{{ statistics["last_new_client"] }}</p>
+                    <span class="icon"><i class="fas fa-user-plus"></i></span>
+                </div>
+            </div>
+
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Country</th>
+                        <th>Client ID</th>
+                        <th>IP Address</th>
+                        <th>UAC</th>
+                        <th>Username</th>
+                        <th>CPU</th>
+                        <th>GPU</th>
+                        <th>RAM</th>
+                        <th>Antivirus</th>
+                        <th>Payload Path</th>
+                        <th>Last Ping</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                    {% for client in client_list %}
+                    <tr>
+                        <td>
+                          <img class="flag" src="https://flagsapi.com/{{ client.country }}/flat/64.png" />
+                        </td>
+                        <td>{{ client.client_id }}</td>
+                        <td>{{ client.ip }}</td>
+                        {% if client.uac %}<td><i class="fa-solid fa-check"></i></td>{% endif %}
+                        {% if not client.uac %}<td><i class="fa-solid fa-xmark"></i></td>{% endif %}
+                        <td>{{ client.username }}</td>
+                        <td>{{ client.cpu }}</td>
+                        <td>{{ client.gpu }}</td>
+                        <td>{{ client.ram }}</td>
+                        <td>{{ client.antivirus }}</td>
+                        <td>{{ client.path }}</td>
+                        <td>{{ client.last_seen }}</td>
+                    </tr>
+                    {% endfor %}
+
+                </tbody>
+            </table>
+        </main>
     </div>
+</body>
 
-    <div class="section">
-      <div class="chart-container">
-        <canvas id="clientConnectionsChart"></canvas>
-      </div>
-    </div>
-
-    <div class="section">
-      <table>
-        <thead>
-            <tr>
-                <th>Country</th>
-                <th>Client ID</th>
-                <th>IP</th>
-                <th>UAC</th>
-                <th>Username</th>
-                <th>CPU</th>
-                <th>GPU</th>
-                <th>RAM</th>
-                <th>Antivirus</th>
-                <th>Payload Path</th>
-                <th>Last Ping</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for client in client_list %}
-            <tr>
-                <td>
-                  <img class="flag" src="https://flagsapi.com/{{ client.country }}/shiny/64.png" />
-                </td>
-                <td class="client_id">{{ client.client_id }}</td>
-                <td>{{ client.ip }}</td>
-                {% if client.uac %}<td><i class="fa-solid fa-check"></i></td>{% endif %}
-                {% if not client.uac %}<td><i class="fa-solid fa-xmark"></i></td>{% endif %}
-                <td>{{ client.username }}</td>
-                <td>{{ client.cpu }}</td>
-                <td>{{ client.gpu }}</td>
-                <td>{{ client.ram }}</td>
-                <td>{{ client.antivirus }}</td>
-                <td>{{ client.path }}</td>
-                <td>{{ client.last_seen }}</td>
-            </tr>
-            {% endfor %}
-
-
-          <div
-            id="custom-context-menu"
-            style="display: none; position: absolute"
-          >
-          
-          <ul>
-            <li onclick="toggleModal('open', 'https://app.apponfly.com/trial')">View Logs</li>
-            <li onclick="remote_shell('client_id')">Offline Keylogger</li>
-            <li class="list-blank"></li>
-            <li>Disk Execution</li>
-            <li>Memory Execution</li>
-            <li class="list-blank"></li>
-            <li onclick="remote_shell('client_id')">Credential Stealer</li>
-            <li class="list-blank"></li>
-            <li style="color: rgb(135, 19, 19)">Block Client</li>
-            <li style="color: rgb(135, 19, 19)">Uninstall</li>
-          </ul>
-        </div>
-        </tbody>
-    </table>
-    </div>
-
-    <div id="myModal" class="modal">
-      <div class="modal-content">
-        <span class="close"></span>
-        <iframe class="embedded_site" src=""></iframe>
-      </div>
-    </div>
-
-    <div id="toast-container"></div>
-
-    <script>
-      function remote_shell(client_id) {
-        launch_toast(
-          "Feature unsupported for this client",
-          "fa-solid fa-xmark"
-        );
-      }
-    </script>
-    <script>
-      function toggleModal(action, url) {
-        var modal = document.getElementById("myModal");
-        var btn = document.getElementById("openModalButton");
-        var span = document.getElementsByClassName("close")[0];
-        var iframe = document.querySelector(".embedded_site"); // Select the iframe
-
-        if (action === "open") {
-          modal.style.display = "block";
-          if (url) {
-            iframe.src = url; // Set the iframe's src attribute if a URL is provided
-          }
-        } else if (action === "close") {
-          modal.style.display = "none";
-        }
-
-        // Event listeners for closing the modal
-        span.onclick = function () {
-          modal.style.display = "none";
-        };
-
-        window.onclick = function (event) {
-          if (event.target == modal) {
-            modal.style.display = "none";
-          }
-        };
-      }
-
-      // Prepare your data
-      const labels = [
-        "1:00 AM",
-        "5:00 AM",
-        "10:00 AM",
-        "2:00 PM",
-        "7:00PM",
-        "12:00PM",
-      ];
-      const dataPoints = [10, 2, 4, 6, 1, 12];
-      const offlineDataPoints = [5, 3, 2, 4, 3, 5]; // Example data points for offline clients
-
-      const ctx = document
-        .getElementById("clientConnectionsChart")
-        .getContext("2d");
-
-      // Create the chart
-      const chart = new Chart(ctx, {
-        type: "line",
-        data: {
-          labels: labels,
-          datasets: [
-            {
-              label: "Client Connections",
-              data: dataPoints,
-              fill: false,
-              borderColor: "#FFFFFF",
-              backgroundColor: "#FFFFFF",
-              pointBackgroundColor: "#FFFFFF",
-              pointBorderColor: "#FFFFFF",
-              tension: 0.2,
-            },
-            {
-              label: "Offline Clients",
-              data: offlineDataPoints,
-              fill: false,
-              borderColor: "#646467", // Red color for the line
-              backgroundColor: "#646467", // Red color for the line
-              pointBackgroundColor: "#646467", // Red color for the points
-              pointBorderColor: "#646467", // Red color for the points border
-              tension: 0.2,
-            },
-          ],
-        },
-        options: {
-          maintainAspectRatio: false,
-          scales: {
-            y: {
-              display: false, // Hide the y-axis labels
-              beginAtZero: true,
-            },
-          },
-          plugins: {
-            legend: {
-              display: false, // Hide the legend
-            },
-            title: {
-              display: false, // Hide the title
-            },
-          },
-        },
-      });
-    </script>
-  </body>
 </html>

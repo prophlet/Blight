@@ -13,8 +13,8 @@ import hashlib
 import time
 import rsa
 
-SERVER_ADDRESS = "http://213.248.43.36"
-API_SECRET = "km2[yqZTb;r{xDg]WB)Cf"
+SERVER_ADDRESS = "http://127.0.0.1:9999"
+API_SECRET = "debug"
 
 def encrypt_data_withkey(plaintext, key):
     cipher = Cipher(algorithms.AES(key), modes.CBC(key[:16]), backend=default_backend())
@@ -42,12 +42,12 @@ client_bytes = secrets.token_bytes(32)
 
 keydata = b'''
 -----BEGIN RSA PUBLIC KEY-----
-MIIBCgKCAQEAzg50Mj2uYOR0ehjeR/g9FjXmBTg0hAV2YWZI/V+ww2qsQ6YLe0i3
-gGaTQYdgt1sAw9yyBVJodCFjiJ1y+gjZuivlJrfVeMQ6gF8ZZ4unkVndYLHmBGcL
-DBfdgOJ9GnK6DCt/uLvRbEXEvQiv62av1OekuPnLZMmqruewmxPQP7rNZtqTku6U
-/9maPpPiTymlJQEKcsqWFsdbZZqbJcPc9ddzYoM3Z3+yX4njXWIKrqPXX9cqpOis
-ARH/rnst1AuP7BaSYjAi55OHOdnfOodUrqas7uCo0mt61ZC97eXm6AY/x/8B3NT7
-Ka4TK1JnaXOLvoysj7RFu/SZU7xpgRAfKwIDAQAB
+MIIBCgKCAQEAx+zN1dr6iV1Upyd9ixoG2gxvupYqIeuFMV0GgWcCK91pcPZCkeQG
+SDy/LhGjCjOMvX/2Eg0wsed99hntvZ2b6RKdsdfrSVUFxvp6H0lEVPGPjDCMssjY
+RLi3JbKIopLtgdDHdnf4nCpnSrMNFV5ZuqdIoQIMaw/imyWATNSB18WOebAA8lI9
+oR0XG89Ob3/IyxIAK1rUqlx1a1oJ+uBsLscsxwOGWyXir6by31uVfrdzxORFviCr
+8bZfuX5wF06WQ9TH1WFAw/G4CTTWP5qooLug04Qt7cAemTLfJjkyaDeLq20ia2ix
+xs9LxVype+cEoOSfpawaAH71Kw+d40Dp7wIDAQAB
 -----END RSA PUBLIC KEY-----
 '''
 

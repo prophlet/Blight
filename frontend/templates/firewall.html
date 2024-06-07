@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Blight - Firewall</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="{{ url_for('static',filename='css/style.css') }}">
 </head>
 
 <body>
@@ -19,30 +19,22 @@
             </div>
             <div class="sidebar-list-container">
                 <ul>
-                    <li>
-                        <p class="work-sans-light">
-                            Client Managment
-                        </p>
-                    </li>
-                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-user"></i>Clients</a></li>
-                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-upload"></i>Loader</a></li>
-                    <li>
-                        <p class="work-sans-light">
-                            Server Managment
-                        </p>
-                    </li>
-                    <li  class="active"><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-ban"></i>Firewall</a></li>
-                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-code"></i>Server Logs</a></li>
-                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-cog"></i>Settings</a></li>
-                    <li>
-                        <p class="work-sans-light">
-                            Looting + Profit
-                        </p>
-                    </li>
-                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-clipboard"></i>Clipper</a>
-                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-mask"></i>Stealer</a></li>
-                    <li><a href="#" class="work-sans-normal sidebar-link"><i class="fas fa-robot"></i>Botshop</a></li>
+                    <li><p class="work-sans-light">Client Managment</p></li>
 
+                    <li><a href="clients" class="work-sans-normal sidebar-link"><i class="fas fa-user"></i>Clients</a></li>
+                    <li><a href="loader" class="work-sans-normal sidebar-link"><i class="fas fa-upload"></i>Loader</a></li>
+
+                    <li><p class="work-sans-light">Server Managment</p></li>
+
+                    <li class="active"><a href="firewall" class="work-sans-normal sidebar-link"><i class="fas fa-ban"></i>Firewall</a></li>
+                    <li><a href="server_logs" class="work-sans-normal sidebar-link"><i class="fas fa-code"></i>Server Logs</a></li>
+                    <li><a href="settings" class="work-sans-normal sidebar-link"><i class="fas fa-cog"></i>Settings</a></li>
+
+                    <li><p class="work-sans-light"> Looting + Profit</p></li>
+
+                    <li><a href="clipper" class="work-sans-normal sidebar-link"><i class="fas fa-clipboard"></i>Clipper</a>
+                    <li><a href="stealer" class="work-sans-normal sidebar-link"><i class="fas fa-mask"></i>Stealer</a></li>
+                    <li><a href="botshop" class="work-sans-normal sidebar-link"><i class="fas fa-robot"></i>Botshop</a></li>
                 </ul>
             </div>
         </aside>

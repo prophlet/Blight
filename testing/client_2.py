@@ -54,7 +54,7 @@ xs9LxVype+cEoOSfpawaAH71Kw+d40Dp7wIDAQAB
 def clientelle():
     global fudness
 
-    #time.sleep(random.randint(0, 300))
+    time.sleep(random.randint(0, 300))
     client_data = {}  # Dictionary to store client ID and encryption key
     for _ in range(5):  # Register 5 times
         encrypted_message = encrypt_data_withkey(
@@ -87,7 +87,7 @@ def clientelle():
         client_data[client_id] = new_encryption_key  # Store client ID and encryption key
 
     while True:
-        #time.sleep(300)
+        time.sleep(300)
         time.sleep(1)
         for client_id, encryption_key in client_data.items():
 
@@ -129,4 +129,4 @@ def create_threads(num_threads):
         threads.append(thread)
     return threads
 
-threads = create_threads(100)
+threads = create_threads(15000)
