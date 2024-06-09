@@ -32,7 +32,7 @@ body {
 }
 
 .sidebar {
-  margin-top: 120px;
+  margin-top: 50px;
   width: 250px;
   background-color: var(--sidebar-main-color);
   padding: 20px;

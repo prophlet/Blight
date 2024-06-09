@@ -65,22 +65,20 @@
                             <hr>
                             <form action="#" method="post">
                                 <label for="name">Execution Type</label>
-                                <select name="Execution Type">
-                                    <option value="nigga">ANY | Download And Execute</option>
-                                    <option value="nigga">.EXE | Update And Remove</option>
-                                    <option value="nigga">.EXE | Update And Keep</option>
-                                    <option value="nigga">.EXE | Proccess Hollowing</option>
-                                    <option value="nigga">.DLL | Reflective DLL</option>
-                                    <option value="nigga">.DLL | Rundll32 From Disk</option>
-                                    <option value="nigga">.BIN | EarlyBird Shellcode</option>
+                                <select name="execution_type">
+                                    <option value="ANY | Download And Execute">ANY | Download And Execute</option>
+                                    <option value=".BIN | EarlyBird Shellcode">.BIN | EarlyBird Shellcode</option>
                                 </select>
                 
                                 <label for="message">Amount</label>
-                                <input type="number" placeholder="Out of 500, or blank for no limit">
+                                <input name="amount" type="number" placeholder="Out of 500, or blank for no limit">
         
                                 <label for="message">Payload</label>
-                                <input type="file">
-        
+                                <input name="payload" type="file">
+
+                                <input type="checkbox" id="vehicle1" name="is_recursive" value="1">
+                                <label for="message">Enable recursive execution?</label>
+
                                 <input id="nigga" type="submit" value="Submit">
                             </form>
                         </div>

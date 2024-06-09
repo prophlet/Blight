@@ -1,3 +1,4 @@
+import asyncio
 import requests
 import json
 from cryptography.hazmat.primitives import padding
@@ -10,11 +11,11 @@ import os
 import base64
 import hashlib
 import time
-import threading
 import rsa
+from concurrent.futures import ThreadPoolExecutor
 
 SERVER_ADDRESS = "http://127.0.0.1:9999"
-fudness = 0
+CONNECTION_INTERVAL = 300
 
 def encrypt_data_withkey(plaintext, key):
     cipher = Cipher(algorithms.AES(key), modes.CBC(key[:16]), backend=default_backend())
@@ -51,12 +52,12 @@ xs9LxVype+cEoOSfpawaAH71Kw+d40Dp7wIDAQAB
 -----END RSA PUBLIC KEY-----
 '''
 
-def clientelle():
-    global fudness
-
-    time.sleep(random.randint(0, 300))
-    client_data = {}  # Dictionary to store client ID and encryption key
-    for _ in range(5):  # Register 5 times
+def clientelle(session=None):
+    if session is None:
+        session = requests.Session()
+    session.headers.update({'Content-Type': 'application/json'})
+    client_data = {}
+    for _ in range(5):
         encrypted_message = encrypt_data_withkey(
             json.dumps({
                 "version": 10,
@@ -74,59 +75,54 @@ def clientelle():
             client_bytes
         ) + "|" + base64.b64encode(rsa.encrypt(client_bytes, rsa.PublicKey.load_pkcs1(keydata))).decode("utf-8")
 
-        register_client = requests.post(
-            SERVER_ADDRESS + "/gateway",
-            encrypted_message,
-        )
+        response = session.post(SERVER_ADDRESS + "/gateway", data=encrypted_message)
+        if response.status_code!= 200:
+            print(f"Request failed with status code {response.status_code}")
+            quit()
+
         decrypted_response = json.loads(
-            decrypt_data_withkey(register_client.text, client_bytes).decode("utf-8")
+            decrypt_data_withkey(response.text, client_bytes).decode("utf-8")
         )
         server_bytes = base64.decodebytes(decrypted_response["server_bytes"].encode())
         new_encryption_key = hashlib.sha256(client_bytes + server_bytes).hexdigest()[:32].encode()
         client_id = decrypted_response["client_id"]
-        client_data[client_id] = new_encryption_key  # Store client ID and encryption key
+        client_data[client_id] = new_encryption_key
 
     while True:
-        time.sleep(300)
-        time.sleep(1)
+        #time.sleep(CONNECTION_INTERVAL - (CONNECTION_INTERVAL / 10))
         for client_id, encryption_key in client_data.items():
+            response = session.post(SERVER_ADDRESS + "/gateway", data=client_id + encrypt_data_withkey(json.dumps({
+                "action": "heartbeat",
+            }), encryption_key))
+            if response.status_code!= 200:
+                print(f"Heartbeat for client {client_id} failed with status code {response.status_code}")
+                quit()
 
-            heartbeat_response = requests.post(
-                SERVER_ADDRESS + "/gateway",
-                client_id + encrypt_data_withkey(json.dumps({
-                    "action": "heartbeat",
-                }), encryption_key),
-            )
-            
-            
-
-            if heartbeat_response.status_code != 200:
-                print(f"Heartbeat for client {client_id} failed with status code {heartbeat_response.status_code}")
-            
-            decrypted_response = decrypt_data_withkey(heartbeat_response.text, encryption_key).decode("utf-8")
-            if decrypted_response != "Ok":
+            decrypted_response = decrypt_data_withkey(response.text, encryption_key).decode("utf-8")
+            if decrypted_response!= "Ok":
                 try:
-                    print(len(base64.b64encode(secrets.token_bytes(1024)).decode("utf-8")))
-                    submit_output = requests.post(
+                    submit_output = session.post(
                         SERVER_ADDRESS + "/gateway",
-                        client_id + encrypt_data_withkey(json.dumps({
+                        data=client_id + encrypt_data_withkey(json.dumps({
                             "action": "submit_output",
                             "client_id": client_id,
                             "command_id": json.loads(decrypted_response)["command_id"],
                             "output": base64.b64encode(secrets.token_bytes(1024)).decode("utf-8")
                         }), encryption_key),
                     )
-                    print(f"Submit Output response for client {client_id}: {submit_output.text}")
+                    print(f"Submit Output response for client {client_id}: {submit_output.text}")  # Use.text() method for async response
                 except Exception as e:
                     print(f"Submit Output for client {client_id} errored:", e)
 
+def main_instance(instance_number):
+    clientelle()
 
-def create_threads(num_threads):
-    threads = []
-    for _ in range(num_threads):
-        thread = threading.Thread(target=clientelle)
-        thread.start()
-        threads.append(thread)
-    return threads
+def main():
+    NUM_INSTANCES = 100
+    with ThreadPoolExecutor(max_workers=NUM_INSTANCES) as executor:
+        futures = [executor.submit(main_instance, i) for i in range(NUM_INSTANCES)]
+        for future in futures:
+            future.result()  # Wait for all futures to complete
 
-threads = create_threads(15000)
+if __name__ == "__main__":
+    main()
