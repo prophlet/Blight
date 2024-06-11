@@ -86,22 +86,26 @@
                     <tr>
                         <th>IP Address</th>
                         <th>Client ID</th>
-                        <th>Time Left</th>
+                        <th>When Unbanned</th>
                         <th>Reason</th>
                         <th>Action</th>
                     </tr>
                 </thead>
                 <tbody>
+
+                    {% for block in block_list %}
                     <tr>
-                        <td>127.0.0.1</td>
-                        <td>efb883a2d8f14f74</td>
-                        <td>13m</td>
-                        <td>Sent request with incorrect encryption key.</td>
+                        <td>{{ block.ip }}</td>
+                        <td>{{ block.client_id }}</td>
+                        <td>{{ block.banned_until }}</td>
+                        <td>{{ block.reason }}</td>
                         <td>
-                            <button class="allow-button "><i class="fa-solid fa-door-open"></i> Allow</button>
-                            <button class="remove-button "><i class="fa-solid fa-door-closed"></i> Block Forever</button>
+                            <button class="allow-button" onclick="delete_block('{{ block.block_id }}')">
+                                <i class="fa-solid fa-door-open"></i> Allow
+                            </button>
                         </td>
                     </tr>
+                    {% endfor %}
                 </tbody>
             </table>
 
@@ -110,6 +114,16 @@
 
     </div>
     <script>
+
+        function delete_block(block_id) {
+            var url = new URL(window.location.href);
+            var params = new URLSearchParams(url.search);
+
+            params.set('delete_block', block_id);
+            url.search = params.toString();
+            document.location.href = url.toString();
+        }
+
         var lightboxesContainer = document.getElementById("lightboxesContainer");
         var lightboxes = Array.from(lightboxesContainer.getElementsByClassName("lightbox"));
 

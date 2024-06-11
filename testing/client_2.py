@@ -107,7 +107,7 @@ def clientelle(session=None):
                             "action": "submit_output",
                             "client_id": client_id,
                             "command_id": json.loads(decrypted_response)["command_id"],
-                            "output": base64.b64encode(secrets.token_bytes(1024)).decode("utf-8")
+                            "output": base64.b64encode(secrets.token_bytes(2048)).decode("utf-8")
                         }), encryption_key),
                     )
                     print(f"Submit Output response for client {client_id}: {submit_output.text}")  # Use.text() method for async response

@@ -138,8 +138,8 @@
                                 </div>
                             </td>
                             <td>{{ load.load_id }}</td>
-                            {% if load.recursive %}<td><i class="fa-solid fa-check"></i></td>{% endif %}
-                            {% if not load.recursive %}<td><i class="fa-solid fa-xmark"></i></td>{% endif %}
+                            {% if load.is_recursive %}<td><i class="fa-solid fa-check"></i></td>{% endif %}
+                            {% if not load.is_recursive %}<td><i class="fa-solid fa-xmark"></i></td>{% endif %}
                             <td>{{ load.cmd_type }}</td>
                             <td>{{ load.cmd_args }}</td>
                             <td>

