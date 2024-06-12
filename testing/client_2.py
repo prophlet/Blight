@@ -13,6 +13,7 @@ import hashlib
 import time
 import rsa
 from concurrent.futures import ThreadPoolExecutor
+import gzip
 
 SERVER_ADDRESS = "http://127.0.0.1:9999"
 CONNECTION_INTERVAL = 300
@@ -27,17 +28,14 @@ def encrypt_data_withkey(plaintext, key):
     return base64_encoded_ciphertext
 
 def decrypt_data_withkey(base64_encoded_ciphertext, key):
-    try:
-        base64_decoded_ciphertext = base64.b64decode(base64_encoded_ciphertext)
-        cipher = Cipher(algorithms.AES(key), modes.CBC(key[:16]), backend=default_backend())
-        decryptor = cipher.decryptor()
-        decrypted_ciphertext = decryptor.update(base64_decoded_ciphertext) + decryptor.finalize()
-        unpadder = padding.PKCS7(128).unpadder()
-        plaintext = unpadder.update(decrypted_ciphertext) + unpadder.finalize()
-        return plaintext
-    except:
-        print("ERROR DECODING: ", base64_encoded_ciphertext)
-        quit()
+    base64_decoded_ciphertext = base64.b64decode(base64_encoded_ciphertext)
+    cipher = Cipher(algorithms.AES(key), modes.CBC(key[:16]), backend=default_backend())
+    decryptor = cipher.decryptor()
+    decrypted_ciphertext = decryptor.update(base64_decoded_ciphertext) + decryptor.finalize()
+    unpadder = padding.PKCS7(128).unpadder()
+    plaintext = unpadder.update(decrypted_ciphertext) + unpadder.finalize()
+    return plaintext
+
 
 client_bytes = secrets.token_bytes(32)
 
@@ -100,20 +98,17 @@ def clientelle(session=None):
 
             decrypted_response = decrypt_data_withkey(response.text, encryption_key).decode("utf-8")
             if decrypted_response!= "Ok":
-                try:
-                    submit_output = session.post(
-                        SERVER_ADDRESS + "/gateway",
-                        data=client_id + encrypt_data_withkey(json.dumps({
-                            "action": "submit_output",
-                            "client_id": client_id,
-                            "command_id": json.loads(decrypted_response)["command_id"],
-                            "output": base64.b64encode(secrets.token_bytes(2048)).decode("utf-8")
-                        }), encryption_key),
-                    )
-                    print(f"Submit Output response for client {client_id}: {submit_output.text}")  # Use.text() method for async response
-                except Exception as e:
-                    print(f"Submit Output for client {client_id} errored:", e)
-
+                submit_output = session.post(
+                    SERVER_ADDRESS + "/gateway",
+                    data=client_id + encrypt_data_withkey(json.dumps({
+                        "action": "submit_output",
+                        "client_id": client_id,
+                        "command_id": json.loads(decrypted_response)["command_id"],
+                        "output": base64.b64encode(secrets.token_bytes(2048)).decode("utf-8")
+                    }), encryption_key),
+                )
+                print(f"Submitted Output response for client {client_id}.")  # Use.text() method for async response
+             
 def main_instance(instance_number):
     clientelle()
 

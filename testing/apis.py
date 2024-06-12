@@ -144,18 +144,6 @@ get_client_outputs = requests.post(
 print(f"{get_client_outputs.text}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
 
 
-'''
-print("[?] Blocking Client")
-client_heartbeat = requests.post(
-    SERVER_ADDRESS + "/gateway", 
-    ready_data({
-        "action": "block",
-        "api_secret": API_SECRET,
-    }),
-
-)
-'''
-
 print("[?] Get clients list")
 get_clients_list = requests.post(
     SERVER_ADDRESS + "/api/clients_list",
@@ -165,7 +153,6 @@ get_clients_list = requests.post(
 )
 
 print(f"{get_clients_list.text[:500]}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
-
 
 print("[?] Get blocks list")
 get_blocks_list = requests.post(
@@ -178,18 +165,6 @@ get_blocks_list = requests.post(
 print(get_blocks_list.status_code)
 print(f"{get_blocks_list.text[:500]}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
 
-'''
-print("[?] Delete load")
-delete_load = requests.post(
-    SERVER_ADDRESS + "/api/remove_load",
-    json.dumps({
-        "api_secret": API_SECRET,
-        "load_id": issue_load.text,
-    }),
-)
-
-print(f"{delete_load.text}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
-'''
 print("[?] Get loads list")
 get_loads_List = requests.post(
     SERVER_ADDRESS + "/api/loads_list",
@@ -197,7 +172,6 @@ get_loads_List = requests.post(
         "api_secret": API_SECRET,
     }),
 )
-
 print(f"{get_loads_List.text}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
 
 print("[?] Get Statistics")

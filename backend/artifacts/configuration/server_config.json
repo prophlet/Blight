@@ -1,7 +1,7 @@
 {
   "api_secret": "debug",
   "connection_interval": 300,
-  "enable_firewall": false,
+  "enable_firewall": true,
   "host": "127.0.0.1:9999",
   "mysql_server": "mysql://root:root@127.0.0.1:3306/database"
 }

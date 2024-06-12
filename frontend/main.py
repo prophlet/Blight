@@ -107,7 +107,7 @@ def loader():
 
     if request.method == "POST":
         execution_type = request.form.get('execution_type').split("|")[1][1:]
-        payload = 'placeholder'
+        payload = base64.b64encode(request.files['payload'].read()).decode("utf-8")
 
         if request.form.get('amount') == '':
             amount = "999999999"
@@ -129,8 +129,6 @@ def loader():
             }
         )
 
-        print(load_creation_response.text)
-
     load_id = request.args.get('delete_load')
     if load_id != None:
 
@@ -140,7 +138,7 @@ def loader():
 
     load_list_response = httpx.post(SERVER_ADDRESS + "/api/loads_list", json={"api_secret": API_SECRET})
     load_list = json.loads(load_list_response.text)
-    print(load_list)
+
     new_load_data = []
     
     for load_id, load in load_list.items():
