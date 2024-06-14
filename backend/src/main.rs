@@ -13,7 +13,6 @@ use std::{
     process::Command,
     path::Path, 
     sync::{Arc, RwLock},
-
 };
 
 use rsa::{
@@ -250,7 +249,6 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                         return resp_unsupported();
                     }
                 }
-
 
                 return resp_ok_encrypted("Well done! Connection succesfully established.", encryption_key.as_bytes()).await;
             } else {
@@ -1461,6 +1459,7 @@ fn get_timestamp() -> u64 {
 }
 
 
+// TODO :BUFFER TOO SMALL
 
 fn aes_256cbc_encrypt(data: &str, key: &[u8]) -> core::result::Result<String, symmetriccipher::SymmetricCipherError> {
 
