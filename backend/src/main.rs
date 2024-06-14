@@ -34,7 +34,6 @@ use crypto::buffer::{ ReadBuffer, WriteBuffer, BufferResult };
 use mysql_async::{*, prelude::*};
 
 use colored::Colorize;
-use ansi_term;
 use random_string::generate;
 use lazy_static::lazy_static;
 use crate::serde_json::json;
@@ -1658,12 +1657,6 @@ async fn resp_ok_encrypted(message: &str, key: &[u8]) -> HttpResponse {
 async fn initialize_tables(connection_pool: Pool) {
     let mut connection: Conn = connection_pool.get_conn().await.expect("Unable to connect to database.");
 
-    connection.query_drop(r"
-    
-        SET GLOBAL query_cache_size = 268435455;
-
-    ").await.expect("Failed to init db");
-
     connection.query_drop(
         r"
         CREATE TABLE IF NOT EXISTS clients (
@@ -1685,8 +1678,6 @@ async fn initialize_tables(connection_pool: Pool) {
             encryption_key TEXT,
             key_expiration INT
         )  ENGINE=InnoDB;
-    
-        CREATE INDEX IF NOT EXISTS idx_clients_client_id ON clients (client_id);
         ").await.expect("clients table creation failed");
 
     
@@ -1709,11 +1700,8 @@ async fn initialize_tables(connection_pool: Pool) {
             cmd_args TEXT,
             time_issued INT
         ) ENGINE=InnoDB;
-    
-        CREATE INDEX IF NOT EXISTS idx_commands_client_id ON commands (client_id);
-        CREATE INDEX IF NOT EXISTS idx_commands_command_id ON commands (command_id);
 
-        ").await.expect("commands table creation failed");
+    ").await.expect("commands table creation failed");
     
     connection.query_drop(
         r"
@@ -1727,10 +1715,7 @@ async fn initialize_tables(connection_pool: Pool) {
             time_issued INT,
             time_received INT
         ) ENGINE=InnoDB;
-    
-        CREATE INDEX IF NOT EXISTS idx_outputs_client_id ON outputs (client_id);
-        CREATE INDEX IF NOT EXISTS idx_outputs_command_id ON outputs (command_id);
-        CREATE INDEX IF NOT EXISTS idx_outputs_output_id ON outputs (output_id);
+
         ").await.expect("outputs table creation failed");
     
     connection.query_drop(
@@ -1743,9 +1728,7 @@ async fn initialize_tables(connection_pool: Pool) {
             cmd_type TEXT,
             time_issued INT
         ) ENGINE=InnoDB;
-    
-        CREATE INDEX IF NOT EXISTS idx_loads_load_id ON loads (load_id);
-        ").await.expect("loads table creation failed");
+    ").await.expect("loads table creation failed");
     
     connection.query_drop(
         r"
@@ -1756,10 +1739,8 @@ async fn initialize_tables(connection_pool: Pool) {
             ip TEXT,
             banned_until INT
         ) ENGINE=InnoDB;
-    
-        CREATE INDEX IF NOT EXISTS idx_blocks_client_id ON blocks (client_id);
-        CREATE INDEX IF NOT EXISTS idx_blocks_ip ON blocks (ip);
-        ").await.expect("blocks table creation failed");
+
+    ").await.expect("blocks table creation failed");
 
 }
 
@@ -1780,10 +1761,14 @@ fn decompress_bytes(input: &[u8]) -> Vec<u8>{
 
 // ------------------------ Main Program ------------------------
 
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+
+    #[cfg(target_os = "windows")]
     let enabled = colored::control::set_virtual_terminal(true).unwrap();
+
+    #[cfg(target_os = "linux")]
+    Command::new("ulimit").arg("-n").arg("524288");
 
     println!("
     _                 
@@ -1793,11 +1778,6 @@ async fn main() -> std::io::Result<()> {
              (/            
                            
     ");
-
-    // Set open file limit to really high
-    Command::new("ulimit")
-    .arg("-n")
-    .arg("524288");
 
     let json_config = fs::read("artifacts/configuration/server_config.json");
 
@@ -1813,9 +1793,10 @@ async fn main() -> std::io::Result<()> {
                 &json!({
                     "host": "127.0.0.1:9999",
                     "connection_interval": 60,
+                    "purgatory_interval": 60,
                     "mysql_server": "mysql://root:root@127.0.0.1:3306/mydb",
                     "api_secret": "root",
-                    "ENABLE_FIREWALL": false
+                    "enable_firewall": false
                 })
             ).unwrap()).expect("Unable to write json file.");
 
