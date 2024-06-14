@@ -6,12 +6,15 @@ import random
 import binascii
 from itertools import permutations
 
-def charsex(charset='e621.net'):
-    permutations_list = [''.join(p) for p in permutations(charset)]
+
+def charsex_bytes(bytearray_input):
+    if isinstance(bytearray_input, bytes):
+        bytearray_input = list(bytearray_input)
+    
+    permutations_list = [''.join(p) for p in permutations(bytearray_input)]
     return permutations_list
 
-
-all_bytes = charsex()
+all_bytes = charsex_bytes()
 times_found = []
 
 print(all_bytes)

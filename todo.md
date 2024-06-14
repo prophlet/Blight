@@ -24,3 +24,27 @@
 
 - Send a registration request to the server using the sha256 hash as the AES key for the message.
 - If the server's sha256 hash matches the client's sha256 hash, continue. If there is a mismatch, block the client.
+
+
+Change encryption key on server to not append the timestamp to it, but to just store it in the SQL db in a seperate column.
+
+
+
+
+
+
+Client sends client bytes using RSA (32 bytes).
+Server takes client bytes and server bytes (8 bytes server bytes), computes sha256 hash for them and stores the encryption key in "purgatory".
+Server sends seed and server byte hash to client (aes encrypted using client bytes).
+
+Client cracks hash using seed, generates same encryption key as server, and sends registration request.
+    Request is formatted like this: AES_encrypted_client_data.RSA_encrypted_encryption_key
+
+    The client data is encrypted using the encryption key, 
+
+Server checks if the encryption key is in purgatory, and if the time hasn't expired.
+    If the encryption key is in purgatory and it's not expired, insert the client data into the 'clients' table and delete the row from purgatory.
+    If the key is expired, block the IP for 20 minutes. 
+    If the key isn't in purgatory, block the IP forever.
+
+Request IP will also be stored in purgatory. If the request IP isn't the same as the submission ip, block both.

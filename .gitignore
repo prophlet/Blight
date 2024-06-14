@@ -1,4 +1,5 @@
 .venv/*
+.VSCodeCounter/*
 backend/target/*
 backend/artifacts/storages/*
 Cargo.lock

