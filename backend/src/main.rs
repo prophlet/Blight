@@ -34,6 +34,7 @@ use crypto::buffer::{ ReadBuffer, WriteBuffer, BufferResult };
 use mysql_async::{*, prelude::*};
 
 use colored::Colorize;
+use ansi_term;
 use random_string::generate;
 use lazy_static::lazy_static;
 use crate::serde_json::json;
@@ -1782,6 +1783,7 @@ fn decompress_bytes(input: &[u8]) -> Vec<u8>{
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    let enabled = colored::control::set_virtual_terminal(true).unwrap();
 
     println!("
     _                 
