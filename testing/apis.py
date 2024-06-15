@@ -76,7 +76,7 @@ for chosen_bytes in charsex_bytes(base64.b64decode(handshake_1_response["seed"])
     client_hasher = argon2.PasswordHasher(time_cost=16, memory_cost=2**4, parallelism=2, hash_len=32, type=argon2.low_level.Type.ID)
 
     try:
-        client_hasher.verify(handshake_1_response["server_hash"], bytes(chosen_bytes))
+        client_hasher.verify(handshake_1_response["hash"], bytes(chosen_bytes))
         time_found = int(time.time() - start_time)
         server_bytes = bytes(chosen_bytes)
     except argon2.exceptions.VerifyMismatchError:
@@ -100,7 +100,6 @@ registration_payload = base64.b64encode(rsa.encrypt(encryption_key, rsa.PublicKe
         "antivirus": "Windows Defender",
         "path": "C:\\Windows\\System32\\malware.exe",
         "pid": 5102,
-        "client_bytes": base64.encodebytes(client_bytes).decode("utf-8"),
     }),
     encryption_key
 )

