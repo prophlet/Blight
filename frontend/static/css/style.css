@@ -215,7 +215,6 @@ body {
 }
 
 .progress-container {
-  width: 75%; /* Adjust based on your needs */
   background-color: var(--filter-reset); /* Light grey background */
   border-radius: 5px; /* Rounded corners */
 }
@@ -380,4 +379,9 @@ label {
 
 .server-logs-area {
   height: 75%;
+}
+
+.progress-recursive-replacement {
+  display: flex;
+  flex-direction: row;
 }

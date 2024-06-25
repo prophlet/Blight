@@ -41,6 +41,7 @@ pub async fn api_clients_list(req_body: String) -> impl Responder {
                     "last_seen":value_to_u64(&row, 13),
                     "first_seen": value_to_u64(&row, 14),
                     "online": is_online,
+                    "build_id": value_to_str(&row, 17),
                 }
             );            
         }

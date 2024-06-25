@@ -135,22 +135,28 @@ pub fn all_keys_valid(json: &serde_json::Value, keys: Vec<&str>, types: Vec<&str
     let mut counter: usize = 0;
     for key in keys {
         if let Some(_) = json.get(key) {
-            // Check if key is one of the valid types:
-            if types[counter] == "String" {
-                match json[key].as_str() {
-                    Some(_) => (),
-                    None => return false,
-                };
-            } else if types[counter] == "u64" {
-                match json[key].as_u64() {
-                    Some(_) => (),
-                    None => return false,
-                };
-            } else if types[counter] == "bool" {
-                match json[key].as_bool() {
-                    Some(_) => (),
-                    None => return false,
-                };
+            match types[counter] {
+                "String" => {
+                    match json[key].as_str() {
+                        Some(_) => (),
+                        None => return false,
+                    };
+                }
+                "u64" => {
+                    match json[key].as_u64() {
+                        Some(_) => (),
+                        None => return false,
+                    };
+                },
+                "bool" => {
+                    match json[key].as_bool() {
+                        Some(_) => (),
+                        None => return false,
+                    };
+                }
+                &_ => {
+                    return false
+                }
             }
         } else {
             return false;

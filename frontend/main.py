@@ -52,7 +52,7 @@ def convert_to_future(timestamp):
         return f"In {add0(int(delta // 86400))}d"
 
 
-SERVER_ADDRESS = "https://4c7a-169-150-203-56.ngrok-free.app"
+SERVER_ADDRESS = "http://127.0.0.1:9999"
 API_SECRET = "dj)!gf0CN eIX)#!e9jxm)SAh0btpmr"
 
 app = Flask(__name__)

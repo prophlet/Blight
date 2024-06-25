@@ -58,6 +58,7 @@ use rand::RngCore;
 use crate::CONNECTION_POOL;
 use crate::CHARSET;
 use crate::CONNECTION_INTERVAL;
+use crate::CONNECTION_INTERVAL_BUFFER;
 use crate::DISCORD_WEBHOOK_URL;
 use crate::IP_DATABASE;
 use crate::ENABLE_FIREWALL;

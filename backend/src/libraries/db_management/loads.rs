@@ -53,9 +53,32 @@ pub async fn task_clients(cmd_args: &str, cmd_type: &str, load_id: &str, amount:
 }
 
 
+/*
+
+SELECT load_id 
+FROM loads 
+WHERE is_recursive = 1 
+OR (
+    '7tbiBXOF' NOT IN (
+        SELECT load_id FROM outputs WHERE client_id = 'f649ed4bc81a0b91' AND load_id = '7tbiBXOF'
+    ) 
+    AND load_id = '7tbiBXOF'
+    AND required_amount!= completed_amount
+) LIMIT 100
+
+*/
 pub async fn is_uncompleted_load(connection: &mut Conn, client_id: &str, load_id: &str) -> bool {
     let loads_query_sql: std::result::Result<Option<String>, Error> = connection.exec_first(
-        r"SELECT load_id FROM loads WHERE load_id NOT IN (SELECT command_id FROM outputs WHERE client_id = :client_id) AND load_id = :load_id AND required_amount != completed_amount ",
+        r"SELECT load_id FROM loads 
+        WHERE is_recursive = 1 
+        OR (
+            :load_id NOT IN (
+                SELECT load_id FROM outputs WHERE client_id = :client_id AND load_id = :load_id
+            ) 
+            AND load_id = :load_id  
+            AND required_amount != completed_amount
+        )
+        ",
         params! {
             "client_id" => &client_id,
             "load_id" => &load_id,
