@@ -54,6 +54,42 @@ pub async fn api_clients_list(req_body: String) -> impl Responder {
     }
 }
 
+
+
+#[post("/api/issue_command")]
+pub async fn api_issue_command(req_body: String) -> impl Responder {
+    let json = serde_json::from_str(&req_body).unwrap();
+    let api_secret: String = String::from(str::from_utf8(&*API_SECRET.read().unwrap().as_bytes()).unwrap());
+
+    if key_to_string(&json, "api_secret") == api_secret {
+
+        let mut connection: Conn = obtain_connection().await;
+
+        let parsed_cmd_args = &parse_storage_write(key_to_string(&json, "cmd_args").as_bytes());
+        let client_id = &key_to_string(&json, "client_id");
+        let cmd_type = key_to_string(&json, "cmd_type");
+
+        let command_id = task_client(
+            &mut connection, 
+            &client_id, 
+            "N/A", 
+            &parsed_cmd_args,
+            &cmd_type,
+         ).await;
+        fprint("success", &format!("Command executed on {} with type {}", 
+           client_id, cmd_type.yellow()
+        ));
+
+        return resp_ok(command_id);
+    } else {
+        fprint("failure", &format!("Request was sent to /api/issue without authentication."));
+        return resp_unauthorised();
+
+    }
+}
+
+
+
 #[post("/api/statistics")]
 pub async fn statistics(req_body: String) -> impl Responder {
 

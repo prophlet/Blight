@@ -26,7 +26,6 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
 
     let connection_interval = *CONNECTION_INTERVAL.read().unwrap();
     let connection_interval_buffer = *CONNECTION_INTERVAL_BUFFER.read().unwrap();
-    let enable_firewall = *ENABLE_FIREWALL.read().unwrap();
 
     let mut connection: Conn = obtain_connection().await;
     let ip: String = req.peer_addr().unwrap().ip().to_string();
@@ -43,7 +42,6 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
 
             if split_body[0].len() == CLIENT_ID_LENGTH && is_client(&mut connection, split_body[0]).await {
                 let client_id = split_body[0];
-
 
                 if is_client_blocked(&mut connection, client_id, &ip).await {
                     fprint("restricted", &format!("({}) {} tried doing an action while blocked.", &ip, &client_id));
@@ -118,6 +116,12 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                 
                         let command_id = key_to_string(&submitted_json, "command_id");
                         let output_id = generate(8, CHARSET);
+                        let output = key_to_string(&submitted_json, "output");
+
+                        if output.len() > (*MAX_OUTPUT_SUBMISSION_KB.read().unwrap() as usize) * 1024 {
+                            block_client(&mut connection, client_id, "Sending too large of a submission.", &ip, 1200).await;
+                            return resp_unauthorised();
+                        }
                 
                         match get_command_info(&mut connection, &command_id).await {
                             
@@ -143,7 +147,7 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                                         "client_id" => &client_id,
                                         "cmd_args" => &cmd_args,
                                         "cmd_type" => &cmd_type,
-                                        "output" => &parse_storage_write(key_to_string(&submitted_json, "output").as_bytes()),
+                                        "output" => &parse_storage_write(output.as_bytes()),
                                         "time_issued" => &time_issued,
                                         "time_received" => get_timestamp(),
                     
@@ -422,6 +426,11 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
             
         // Part of handshake where we issue the hash that the client needs to crack
         HANDSHAKE_P1 => {
+            
+            if is_suspicious_ip(&ip).await {
+                block_client(&mut connection, "N/A", "IP marked as suspicious, registration rejected.", &ip, 1200).await;
+                return resp_unauthorised()
+            }
 
             let decrypted_first_half = match (*PRIVATE_KEY.read().unwrap()).decrypt(Pkcs1v15Encrypt, &BASE64_STANDARD.decode(&split_body[0]).unwrap()) {
                 Ok(result) => result,

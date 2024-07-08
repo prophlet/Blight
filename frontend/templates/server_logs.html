@@ -39,8 +39,26 @@
             </div>
         </aside>
         <main class="content">
-           
-            <textarea class="server-logs-area" disabled>{{ parsed_text }}</textarea>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Client ID</th>
+                        <th>Command Type</th>
+                        <th>Output</th>
+                        <th>Time To Complete</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for output in new_outputs_list %}
+                    <tr>
+                        <td>{{ output.client_id }}</td>
+                        <td>{{ output.cmd_type }}</td>
+                        <td>{{ output.output }}</td>
+                        <td>{{ output.time_to_complete }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </main>
 
     </div>

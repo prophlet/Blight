@@ -34,7 +34,7 @@ pub async fn get_command_info(connection: &mut Conn, command_id: &str) -> std::r
 
 }
 
-pub async fn task_client(connection: &mut Conn, client_id: &str, load_id: &str, cmd_args: &str, cmd_type: &str) -> bool{
+pub async fn task_client(connection: &mut Conn, client_id: &str, load_id: &str, cmd_args: &str, cmd_type: &str) -> String {
 
     let command_id = generate(8, CHARSET);
     let task_client_sql_success = connection.exec_drop(  
@@ -56,13 +56,13 @@ pub async fn task_client(connection: &mut Conn, client_id: &str, load_id: &str, 
     ).await;
 
     match task_client_sql_success {
-        Ok(_) => true,
+        Ok(_) => command_id,
         Err(e) => {
             fprint("error", &format!(
                 "(task_client): {}", 
                 e
             ));
-            false
+            "N/A".to_string()
         }
     }
 }

@@ -191,6 +191,19 @@ pub fn argon2_hash(input: &[u8]) -> String {
     return argon2.hash_password(input, &salt).unwrap().to_string();    
 }
 
+pub async fn is_suspicious_ip(ip: &str) -> bool {
+    if !&*SUSPICIOUS_IP_CHECK.read().unwrap() {return false}
+    let resp = match reqwest::get(format!("https://scamalytics.com/ip/{}", ip)).await {
+        Ok(r) => r,
+        Err(e) => {
+            fprint("error", &format!("(is_suspicious_ip): {}", e));
+            return true;
+        }
+    }.text().await.unwrap();
+    
+    return resp.contains("Yes");
+}
+
 /* 
 pub fn verify_argon2(hash: &str, input: &[u8]) -> bool {
 

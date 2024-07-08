@@ -258,10 +258,7 @@ button {
   margin-left: 10px;
   margin-right: 10px;
   height: 100%;
-  border-radius: 5px;
-  border-color: var(--dim-border);
-  border-style: solid;
-  border-width: 1px;
+
 }
 
 h2 {
@@ -334,7 +331,7 @@ label {
 .loadCreationButton {
   width: 200px;
   margin-right: 20px;
-  margin-bottom: 50px;
+  margin-bottom: 25px;
 }
 
 .lightbox {

@@ -16,11 +16,7 @@ use actix_web::{
     web, App, HttpServer
 };
 
-use crate::libraries::{
-    miscellaneous::general::*,
-    GenericError
-};
-
+use crate::libraries::miscellaneous::general::*;
 
 use std::{
     fs, str, fs::File,
@@ -62,6 +58,8 @@ lazy_static! {
     static ref IP_DATABASE: Arc<RwLock<Vec<u8>>> = Arc::new(RwLock::new(vec![u8::from(0)]));
     static ref PRIVATE_KEY: Arc<RwLock<RsaPrivateKey>> = Arc::new(RwLock::new(RsaPrivateKey::new(&mut rand::thread_rng(), 16).unwrap()));
     static ref HOST: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
+    static ref SUSPICIOUS_IP_CHECK: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
+    static ref MAX_OUTPUT_SUBMISSION_KB: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
 }
 
 lazy_static! {
@@ -73,10 +71,7 @@ lazy_static! {
 
 const CHARSET: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
 
-
-// If tb submission is below 512 characters, it will be written to the DB as normal.
-// If the submission is above 512 characters, it will be written to the disk as a storage.
-
+// Generate a random gateway path on first execution. After that, read it from json config 
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -108,12 +103,18 @@ async fn main() -> std::io::Result<()> {
             write!(File::create("artifacts/configuration/server_config.json").unwrap(), "{}", serde_json::to_string_pretty(
                 &json!({
                     "api_secret": "changeme",
+
                     "connection_interval": 300,
                     "connection_interval_buffer": 10,
                     "purgatory_interval": 90,
-                    "enable_firewall": false,
-                    "host": "127.0.0.1:80",
+
+                    "max_output_submission_kb": 10000,
+
+                    "enable_firewall": true,
+                    "suspicious_ip_check": true,
+
                     "mysql_server": "mysql://root:root@127.0.0.1:3306/database",
+                    "host": "0.0.0.0:80",
                     
                     "webhook": {
                       "url": "",
@@ -165,6 +166,8 @@ async fn main() -> std::io::Result<()> {
     *IP_DATABASE.write().unwrap() = geolite_db.unwrap();
     *HOST.write().unwrap() = key_to_string(&parsed_json_config, "host");
     *CONNECTION_INTERVAL_BUFFER.write().unwrap() = key_to_u64(&parsed_json_config, "connection_interval_buffer");
+    *SUSPICIOUS_IP_CHECK.write().unwrap() = key_to_bool(&parsed_json_config, "suspicious_ip_check");
+    *MAX_OUTPUT_SUBMISSION_KB.write().unwrap() = key_to_u64(&parsed_json_config, "max_output_submission_kb");
 
     *DISCORD_WEBHOOK_URL.write().unwrap() = key_to_string(&parsed_json_config["webhook"], "url");
     *NOTIFICATION_ON_CLIENT_REGISTRATION.write().unwrap() = key_to_bool(&parsed_json_config["webhook"], "client_registered");
@@ -286,6 +289,8 @@ async fn main() -> std::io::Result<()> {
             .service(api_remove_block)
             .service(gateway_get_block)
             .service(api_outputs_list)
+            .service(api_parse_storage)
+            .service(api_issue_command)
     })
     .bind(&key_to_string(&parsed_json_config, "host"))? 
     .run()
