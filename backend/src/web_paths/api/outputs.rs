@@ -2,7 +2,11 @@ use crate::web_paths::*;
 
 #[post("/api/get_output")]
 pub async fn api_get_output(req_body: String) -> impl Responder {
-    let json = serde_json::from_str(&req_body).unwrap();
+    let json = match serde_json::from_str(&req_body) {
+        Ok(r) => r,
+        Err(_) => return resp_badrequest()
+    };
+
     let api_secret: String = String::from(str::from_utf8(&*API_SECRET.read().unwrap().as_bytes()).unwrap());
 
     if key_to_string(&json, "api_secret") == api_secret {
@@ -49,7 +53,11 @@ pub async fn api_get_output(req_body: String) -> impl Responder {
 
 #[post("/api/outputs_list")]
 pub async fn api_outputs_list(req_body: String) -> impl Responder {
-    let json = serde_json::from_str(&req_body).unwrap();
+    let json = match serde_json::from_str(&req_body) {
+        Ok(r) => r,
+        Err(_) => return resp_badrequest()
+    };
+
     let api_secret: String = String::from(str::from_utf8(&*API_SECRET.read().unwrap().as_bytes()).unwrap());
 
     if key_to_string(&json, "api_secret") == api_secret {
@@ -94,7 +102,11 @@ pub async fn api_outputs_list(req_body: String) -> impl Responder {
 
 #[post("/api/parse_storage")]
 pub async fn api_parse_storage(req_body: String) -> impl Responder {
-    let json = serde_json::from_str(&req_body).unwrap();
+    let json = match serde_json::from_str(&req_body) {
+        Ok(r) => r,
+        Err(_) => return resp_badrequest()
+    };
+
     let api_secret: String = String::from(str::from_utf8(&*API_SECRET.read().unwrap().as_bytes()).unwrap());
 
     if key_to_string(&json, "api_secret") == api_secret {

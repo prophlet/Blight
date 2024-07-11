@@ -55,8 +55,55 @@ def convert_to_future(timestamp):
 SERVER_ADDRESS = "http://127.0.0.1:9999"
 API_SECRET = "dj)!gf0CN eIX)#!e9jxm)SAh0btpmr"
 HOST,PORT = "127.0.0.1", 6767
+GUEST_KEY = "djfop1jf1pgj1-f2j-12gj01-2g"
 
 app = Flask(__name__)
+
+
+@app.route("/guest/<guest_key>")
+def guest(guest_key):
+
+    if guest_key != GUEST_KEY:
+        return "nuh uh"
+    c_time = time.time()
+    client_list_response = httpx.post(SERVER_ADDRESS + "/api/clients_list", json={"api_secret": API_SECRET})
+    client_list = json.loads(client_list_response.text)
+
+    s_time = time.time()
+    statistics_response = httpx.post(SERVER_ADDRESS + "/api/statistics", json={"api_secret": API_SECRET})
+    statistics = json.loads(statistics_response.text)
+    
+    p_time = time.time()
+    new_client_data = []
+    for client_id, client_data in client_list.items():
+        if not client_data["online"]:
+            continue
+        
+        client_data["first_seen"] = client_data.get("last_seen", time.time())
+        client_data["last_seen"] = convert_to_ago(client_data["last_seen"])
+        
+        if client_data["country"] == "-":
+            client_data["country"] = "NL"
+
+        client_data["client_id"] = client_id
+        new_client_data.append(client_data)
+    
+    new_client_data.sort(key=lambda x: x["first_seen"])
+    new_client_data = new_client_data[::-1]
+
+    statistics["total_clients"] = f"{statistics['total_clients']:,}"
+    statistics["online_clients"] = f"{statistics['online_clients']:,}"
+    statistics["uac_clients"] = f"{statistics['uac_clients']:,}"
+
+    if statistics["last_new_client"] == 0:
+        statistics["last_new_client"] = "N/A"
+    else:
+        statistics["last_new_client"] = convert_to_ago(statistics["last_new_client"])
+
+    print(f"Time for client_list: {time.time() - c_time}\nTime for stats request: {time.time() - s_time}\nTime for processing: {time.time() - p_time}\n")
+
+    return render_template("guest.html", client_list=new_client_data, statistics=statistics)
+
 
 @app.route("/clients")
 def clients():

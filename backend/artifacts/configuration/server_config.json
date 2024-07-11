@@ -1,5 +1,7 @@
 {
   "api_secret": "dj)!gf0CN eIX)#!e9jxm)SAh0btpmr",
+  "gateway_path": "niXmjq7Jk7yve76Z",
+  "useragent": "AQCmw7JX",
 
   "connection_interval": 5,
   "connection_interval_buffer": 10,

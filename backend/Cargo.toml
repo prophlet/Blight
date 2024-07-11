@@ -13,6 +13,7 @@ strip = true        # Strip symbols from binary*
 
 
 [dependencies]
+actix-http = "3.8.0"
 actix-web = "4.5.1"
 argon2 = "0.5.3"
 base64 = "0.22.0"
@@ -22,10 +23,10 @@ itertools = "0.13.0"
 lazy_static = "1.4.0"
 maxminddb = "0.24.0"
 md5 = "0.7.0"
-mysql_async = "0.34.1"
+mysql_async = { version = "0.34.1", default-features = false, features = ["default-rustls"] }
 rand = "0.8.5"
 random-string = "1.1.0"
-reqwest = { version = "0.12.4", features = ["json"] }
+reqwest = { version = "0.12.4", default-features = false, features = ["rustls-tls", "json"] } 
 rsa = "0.9.6"
 rust-crypto = "0.2.36"
 serde_json = "1.0.116"

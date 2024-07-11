@@ -6,6 +6,7 @@ extern crate colored;
 use actix_web::{
     post, get, HttpRequest, Responder
 };
+use actix_http::header::{self, HeaderMap, HeaderValue};
 
 use crate::libraries::{
     miscellaneous::{

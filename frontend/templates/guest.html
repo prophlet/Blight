@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blight - Clients</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static',filename='css/style.css') }}">
+
+</head>
+
+<body>
+
+            <div class="cards">
+                <div class="card">
+                    <header class="card-header">
+                        <p>Online Clients</p>
+                    </header>
+                    <p class="card-number">{{ statistics["online_clients"] }}</p>
+                    <span class="icon"><i class="fas fa-user"></i></span>
+                </div>
+
+                <div class="card">
+                    <header class="card-header">
+                        <p>Total Clients</p>
+                    </header>
+                    <p class="card-number">{{ statistics["total_clients"] }}</p>
+                    <span class="icon"><i class="fas fa-users"></i></span>
+                </div>
+
+                <div class="card">
+                    <header class="card-header">
+                        <p>UAC Clients</p>
+                    </header>
+                    <p class="card-number">{{ statistics["uac_clients"] }}</p>
+                    <span class="icon"><i class="fas fa-shield-halved"></i></span>
+                </div>
+
+                <div class="card">
+                    <header class="card-header">
+                        <p>Last New Client</p>
+                    </header>
+                    <p class="card-number">{{ statistics["last_new_client"] }}</p>
+                    <span class="icon"><i class="fas fa-user-plus"></i></span>
+                </div>
+                
+            </div>
+
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Country</th>
+                        <th>Client ID</th>
+                        <th>Build ID</th>
+                        <th>IP Address</th>
+                        <th>UAC</th>
+                        <th>Username</th>
+                        <th>CPU</th>
+                        <th>GPU</th>
+                        <th>RAM</th>
+                        <th>Antivirus</th>
+                        <th>Payload Path</th>
+                        <th>Last Ping</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                    {% for client in client_list %}
+                    <tr>
+                        <td>
+                          <img class="flag" src="https://flagsapi.com/{{ client.country }}/flat/64.png" />
+                        </td>
+                        <td>{{ client.client_id }}</td>
+                        <td>{{ client.build_id }}</td>
+                        <td>{{ client.ip }}</td>
+                        {% if client.uac %}<td><i class="fa-solid fa-check"></i></td>{% endif %}
+                        {% if not client.uac %}<td><i class="fa-solid fa-xmark"></i></td>{% endif %}
+                        <td>{{ client.username }}</td>
+                        <td>{{ client.cpu }}</td>
+                        <td>{{ client.gpu }}</td>
+                        <td>{{ client.ram }}</td>
+                        <td>{{ client.antivirus }}</td>
+                        <td>{{ client.path }}</td>
+                        <td>{{ client.last_seen }}</td>
+                    </tr>
+                    {% endfor %}
+
+                </tbody>
+            </table>
+</body>
+
+</html>

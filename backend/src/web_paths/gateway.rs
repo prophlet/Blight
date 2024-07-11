@@ -1,6 +1,8 @@
+use actix_web::http::header::USER_AGENT;
+
 use crate::web_paths::*;
 
-#[get("/gateway")]
+#[get("/{tail:.*}")]
 pub async fn gateway_get_block(req: HttpRequest) -> impl Responder {
 
     let mut connection: Conn = obtain_connection().await;
@@ -16,9 +18,20 @@ pub async fn gateway_get_block(req: HttpRequest) -> impl Responder {
     return resp_unauthorised();
 }
 
+#[post("/{tail:.*}")]
+pub async fn gateway(params: web::Path<String>, req_body: String, req: HttpRequest) -> impl Responder {
+    let gateway_path = &*GATEWAY_PATH.read().unwrap();
+    let req_headers: &HeaderMap = req.headers();
+    let ip: String = req.peer_addr().unwrap().ip().to_string();
 
-#[post("/gateway")]
-pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
+    if &params.to_string() != gateway_path {return resp_unauthorised()}
+
+    let mut found = false;
+    for header in req_headers {
+        if header.0 == "User-Agent" && header.1 == &*USERAGENT.read().unwrap() {found = true;}
+    }
+
+    if !found {return resp_unauthorised()}
 
     const HANDSHAKE_P1: usize = 1;
     const HANDSHAKE_P2: usize = 2;
@@ -26,9 +39,7 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
 
     let connection_interval = *CONNECTION_INTERVAL.read().unwrap();
     let connection_interval_buffer = *CONNECTION_INTERVAL_BUFFER.read().unwrap();
-
     let mut connection: Conn = obtain_connection().await;
-    let ip: String = req.peer_addr().unwrap().ip().to_string();
 
     if is_client_blocked(&mut connection, "N/A", &ip).await {
         fprint("restricted", &format!("{} tried sending a request while blocked.", ip));
@@ -197,7 +208,7 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                     Ok(result) => result,
                     Err(_) => {
                         block_client(&mut connection, "N/A","Client sent a registration request encrypted with the wrong RSA key.", &ip, 1200).await;
-                        return resp_badrequest();
+                        return resp_unauthorised();
                     }
                 }; 
 
@@ -211,12 +222,12 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                         if &value_to_str(&row, 2) != &ip {
                             block_client(&mut connection, "N/A", "IP which requested hash differs from which submitted it.", &value_to_str(&row, 2), 0).await;
                             block_client(&mut connection, "N/A", "IP which requested hash differs from which submitted it.", &ip, 0).await;
-                            return resp_badrequest();
+                            return resp_unauthorised();
                         }
                         
                         if value_to_u64(&row, 1) < get_timestamp() {
                             block_client(&mut connection, "N/A", "Took to long to solve the hash.", &ip, 1200).await;
-                            return resp_badrequest();
+                            return resp_unauthorised();
                         }
 
                         drop(
@@ -228,7 +239,7 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                             Ok(result) => result,
                             Err(_) => {
                                 block_client(&mut connection, "N/A", "Sent a registration request encrypted with the wrong AES key.", &ip, 1200).await;
-                                return resp_badrequest();
+                                return resp_unauthorised();
                             }
                         }; 
 
@@ -436,7 +447,7 @@ pub async fn gateway(req_body: String, req: HttpRequest) -> impl Responder {
                 Ok(result) => result,
                 Err(_) => {
                     block_client(&mut connection, "N/A","Client sent a registration request encrypted with the wrong RSA key.", &ip, 1200).await;
-                    return resp_badrequest();
+                    return resp_unauthorised();
                 }
             }; 
 
