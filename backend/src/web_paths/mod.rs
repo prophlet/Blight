@@ -6,7 +6,7 @@ extern crate colored;
 use actix_web::{
     post, get, HttpRequest, Responder
 };
-use actix_http::header::{self, HeaderMap, HeaderValue};
+use actix_http::header::HeaderMap;
 
 use crate::libraries::{
     miscellaneous::{
@@ -37,3 +37,7 @@ use rand;
 
 use itertools::Itertools;
 use rand::seq::SliceRandom;
+
+
+use serde::Serialize;
+use serde_json::{ser::PrettyFormatter, Serializer};

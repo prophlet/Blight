@@ -67,42 +67,6 @@ OR (
 ) LIMIT 100
 
 */
-pub async fn is_uncompleted_load(connection: &mut Conn, client_id: &str, load_id: &str) -> bool {
-    let loads_query_sql: std::result::Result<Option<String>, Error> = connection.exec_first(
-        r"SELECT load_id FROM loads 
-        WHERE is_recursive = 1 
-        OR (
-            :load_id NOT IN (
-                SELECT load_id FROM outputs WHERE client_id = :client_id AND load_id = :load_id
-            ) 
-            AND load_id = :load_id  
-            AND required_amount != completed_amount
-        )
-        ",
-        params! {
-            "client_id" => &client_id,
-            "load_id" => &load_id,
-        }
-    ).await;
-
-    match loads_query_sql {
-        Ok(None) => {
-            false
-        },
-
-        Ok(_) => {
-            true
-        },
-
-        Err(ref e) => {
-            fprint("error", &format!(
-                "(is_uncompleted_load): {}", 
-                e
-            ));
-            false
-        }
-    }
-}
 
 pub async fn increment_load(connection: &mut Conn, load_id: &str, amount: u64) -> () {
     connection.exec_drop(

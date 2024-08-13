@@ -99,6 +99,7 @@ pub fn fprint(stype: &str, sformatted: &str) -> () {
         "restricted" => stype.to_uppercase().red(),
         "success" => stype.to_uppercase().green(),
         "task" => stype.to_uppercase().yellow(),
+        "debug" => stype.to_uppercase().magenta(),
         _ => stype.to_uppercase().white(),
     };
 
@@ -129,6 +130,7 @@ pub fn value_to_bool(row: &mysql_async::Row, index: usize) -> bool { match value
 
 pub fn key_to_string(json: &serde_json::Value, json_key: &str) -> String {String::from(json[json_key].as_str().unwrap())}
 pub fn key_to_u64(json: &serde_json::Value, json_key: &str) -> u64 {json[json_key].as_u64().unwrap()}
+pub fn key_to_array<'a>(json: &'a serde_json::Value, json_key: &'a str) -> Vec<serde_json::Value> {json[json_key].as_array().unwrap().to_owned()}
 pub fn key_to_bool(json: &serde_json::Value, json_key: &str) -> bool {json[json_key].as_bool().unwrap()}
 
 pub fn all_keys_valid(json: &serde_json::Value, keys: Vec<&str>, types: Vec<&str>) -> bool {

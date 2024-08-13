@@ -25,6 +25,31 @@ pub async fn get_last_seen(connection: &mut Conn, client_id: &str) -> u64 {
     }
 }
 
+pub async fn ip_to_client_id(connection: &mut Conn, ip: &str) -> String {
+
+    let client_id_query: std::result::Result<Option<String>, Error>  = connection.exec_first(
+        r"SELECT client_id FROM clients WHERE ip = :ip",
+        params! {
+            "ip" => &ip,
+        }
+    ).await;
+
+    match client_id_query {
+        Ok(None) =>  {
+            return "N/A".to_string();
+        },
+        
+        Ok(_) =>  {
+            client_id_query.unwrap().unwrap()
+        },
+
+        Err(e) => {
+            fprint("error", &format!("At ip_to_client_id: {}", e));
+            return "N/A".to_string();
+        },
+    }
+}
+
 pub async fn update_last_seen(connection: &mut Conn, client_id: &str) -> () {
     let connection_interval = *CONNECTION_INTERVAL.read().unwrap();
 

@@ -10,9 +10,15 @@ pub async fn api_issue_load(req_body: String) -> impl Responder {
     let api_secret: String = String::from(str::from_utf8(&*API_SECRET.read().unwrap().as_bytes()).unwrap());
 
     if key_to_string(&json, "api_secret") == api_secret {
+            
 
+        let mut writer: Vec<u8> = Vec::new();
+        let mut serializer = Serializer::with_formatter(&mut writer, PrettyFormatter::with_indent(b" "));
+            
+        key_to_array(&json, "cmd_args").serialize(&mut serializer).unwrap();
+        
         let mut connection: Conn = obtain_connection().await;
-        let parsed_cmd_args = &parse_storage_write(key_to_string(&json, "cmd_args").as_bytes());
+        let parsed_cmd_args = &parse_storage_write(&writer);
         let load_id: String = generate(8, CHARSET);
 
         match connection.exec_drop(  
