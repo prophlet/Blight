@@ -99,22 +99,3 @@ pub async fn api_outputs_list(req_body: String) -> impl Responder {
         return resp_unauthorised();
     }
 }
-
-#[post("/api/parse_storage")]
-pub async fn api_parse_storage(req_body: String) -> impl Responder {
-    let json = match serde_json::from_str(&req_body) {
-        Ok(r) => r,
-        Err(_) => return resp_badrequest()
-    };
-
-    let api_secret: String = String::from(str::from_utf8(&*API_SECRET.read().unwrap().as_bytes()).unwrap());
-
-    if key_to_string(&json, "api_secret") == api_secret {
-        let read_storage = parse_storage_read(&format!("storage:{}", key_to_string(&json, "storage_id")));
-        return actix_web::HttpResponse::build(actix_web::http::StatusCode::OK).body(read_storage);
-    } else {
-        fprint("failure", &format!("Request was sent to /api/get_output without authentication."));
-        return resp_unauthorised();
-    }
-}
-

