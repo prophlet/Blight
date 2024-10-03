@@ -7,7 +7,7 @@ A preformant and modular malware loader designed to handle tons of clients while
 an API for easy integration with other forms of control.
 
 ### Notice
-This project is being abandoned due to lack of funding and general burnout.
+This project is being abandoned due to lack of funding and general burnout. It will never get an update
 Enjoy the source code, allbe it a little bit shitty.
 
 ### Features:
